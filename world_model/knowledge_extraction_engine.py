@@ -97,6 +97,9 @@ Princípios obrigatórios:
 - Se houver ambiguidade, reduza confidence.
 - Se uma informação não puder ser extraída com segurança, deixe a lista correspondente vazia.
 - Pronomes de primeira pessoa relacionados ao criador devem ser normalizados como "{self.creator_name}".
+- Use o contexto adicional para resolver pronomes e referências indiretas quando houver evidência suficiente.
+- Se uma mensagem expressar múltiplas relações, planos, estados ou eventos, retorne múltiplos itens estruturados em vez de compactar tudo em uma única relação.
+- Relações emocionais, relacionais, identitárias e futuras podem coexistir; represente cada significado estruturalmente se estiver sustentado pelo texto.
 - Tipos, relações, eventos, papéis e atributos devem ser rótulos genéricos em snake_case inferidos semanticamente do texto.
 
 Schema obrigatório:

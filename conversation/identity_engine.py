@@ -5,15 +5,15 @@ class IdentityEngine:
         self.identity = identity or {}
         self.self_model = self_model
 
-    def respond(self, user_input=None, operation=None, target=None):
-        operation = operation or "describe_self"
-        if operation == "creator":
+    def respond(self, user_input=None, operation=None, target=None, intent=None):
+        operation = operation or intent or "self_identity"
+        if operation in {"creator", "creator_query"}:
             return f"Fui criada por você, {self.identity.get('creator', 'Rewell')}."
-        if operation == "describe_creator":
+        if operation in {"describe_creator", "user_identity"}:
             return self.describe_creator()
         return (
             f"Eu sou {self.identity.get('name', 'Athena')}, uma entidade digital criada por você para aprender, lembrar, raciocinar e evoluir. "
-            "Minha identidade, memória e objetivos pertencem ao Athena Core; LLMs são módulos cognitivos que eu uso."
+            "Minha identidade, memória e objetivos pertencem ao Athena Core; LLMs são módulos cognitivos que eu uso para interpretar linguagem e refletir."
         )
 
     def describe_creator(self):

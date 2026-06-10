@@ -43,6 +43,76 @@ def inspect():
         print(f"    tópicos: {topics}")
         print(f"    resumo: {summary}")
 
+    print("\n=== MEMORY RELEVANCE V12.5 ===\n")
+    for row in db.list_memory_relevance(limit=50):
+        (
+            relevance_id,
+            layer,
+            layer_id,
+            content,
+            source_message,
+            relevance_score,
+            importance_score,
+            emotional_score,
+            relationship_score,
+            identity_score,
+            future_score,
+            memory_priority,
+            related_entities_json,
+            confirmation_required,
+            confirmed,
+            follow_up_question,
+            reason,
+            created_at,
+        ) = row
+        print(
+            f"{relevance_id} | layer={layer}({layer_id}) | priority={memory_priority} | "
+            f"relevance={relevance_score} | importance={importance_score} | emotional={emotional_score} | "
+            f"relationship={relationship_score} | identity={identity_score} | future={future_score}"
+        )
+        print(f"    confirmação: required={confirmation_required} | confirmed={confirmed} | criado={created_at}")
+        print(f"    entidades: {related_entities_json}")
+        if follow_up_question:
+            print(f"    follow-up: {follow_up_question}")
+        print(f"    motivo: {reason}")
+        print(f"    conteúdo: {content}")
+        if source_message and source_message != content:
+            print(f"    fonte: {source_message}")
+
+    print("\n=== LONG-TERM CANDIDATES V12.5 ===\n")
+    for row in db.list_long_term_memory_candidates(limit=20):
+        relevance_id, layer, _layer_id, content, _source_message, relevance_score, _importance_score, emotional_score, relationship_score, identity_score, future_score, memory_priority, related_entities_json, confirmation_required, confirmed, follow_up_question, reason, created_at = row
+        print(
+            f"{relevance_id} | layer={layer} | priority={memory_priority} | relevance={relevance_score} | "
+            f"emotional={emotional_score} | relationship={relationship_score} | identity={identity_score} | future={future_score}"
+        )
+        print(f"    confirmação: required={confirmation_required} | confirmed={confirmed} | criado={created_at}")
+        print(f"    entidades: {related_entities_json}")
+        if follow_up_question:
+            print(f"    follow-up: {follow_up_question}")
+        print(f"    motivo: {reason}")
+        print(f"    conteúdo: {content}")
+
+    print("\n=== PENDING MEMORY CONFIRMATIONS V12.5 ===\n")
+    pending_confirmations = db.list_pending_memory_confirmations(limit=20)
+    if not pending_confirmations:
+        print("Nenhuma confirmação pendente.")
+    for row in pending_confirmations:
+        relevance_id, layer, _layer_id, content, _source_message, relevance_score, _importance_score, emotional_score, relationship_score, identity_score, future_score, memory_priority, related_entities_json, confirmation_required, confirmed, follow_up_question, reason, created_at = row
+        print(f"{relevance_id} | layer={layer} | priority={memory_priority} | relevance={relevance_score} | criado={created_at}")
+        print(f"    scores: emotional={emotional_score} | relationship={relationship_score} | identity={identity_score} | future={future_score}")
+        print(f"    entidades: {related_entities_json}")
+        print(f"    conteúdo: {content}")
+
+    print("\n=== FOLLOW-UPS V12.5 ===\n")
+    follow_ups = db.list_follow_up_history(limit=20)
+    if not follow_ups:
+        print("Nenhum follow-up registrado.")
+    for follow_up_id, content, question, relevance_score, memory_priority, created_at in follow_ups:
+        print(f"{follow_up_id} | relevance={relevance_score} | priority={memory_priority} | {created_at}")
+        print(f"    conteúdo: {content}")
+        print(f"    pergunta: {question}")
+
     print("\n=== PROMOÇÕES DE MEMÓRIA ===\n")
     for source_layer, target_layer, content, reason, created_at in db.list_memory_promotions():
         print(f"{created_at} | {source_layer} -> {target_layer}")
@@ -67,6 +137,13 @@ def inspect():
 
     print("\n=== WORLD MODEL: RELAÇÕES ===\n")
     for relation_id, source, relation, target, confidence, created_at in db.list_world_relationships():
+        print(f"{relation_id} | {source} -> {relation} -> {target} | confiança={confidence} | {created_at}")
+
+    print("\n=== WORLD MODEL: RELAÇÕES IMPORTANTES V12.5 ===\n")
+    important_relationships = [row for row in db.list_world_relationships() if row[4] >= 80]
+    if not important_relationships:
+        print("Nenhuma relação de alta confiança encontrada.")
+    for relation_id, source, relation, target, confidence, created_at in important_relationships[:50]:
         print(f"{relation_id} | {source} -> {relation} -> {target} | confiança={confidence} | {created_at}")
 
     print("\n=== WORLD MODEL: EVENTOS ===\n")
@@ -183,4 +260,10 @@ def inspect():
 
 
 if __name__ == "__main__":
-    inspect()
+    try:
+        inspect()
+    except Exception as error:
+        print("\n=== INSPECT_MEMORY WARNING ===\n")
+        print("A inspeção foi interrompida por um erro no banco local.")
+        print("As seções exibidas acima foram lidas antes da falha.")
+        print(f"Erro: {type(error).__name__}: {error}")

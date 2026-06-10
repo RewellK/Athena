@@ -20,7 +20,10 @@ class ReasoningEngine:
         self.thought_engine = ThoughtEngine(memory)
         self.last_conclusion = None
 
-    def respond(self, user_input):
+    def respond(self, user_input, intention=None):
+        request = intention.get("structured_request") if isinstance(intention, dict) and isinstance(intention.get("structured_request"), dict) else {}
+        if request.get("operation") == "explain_last_conclusion":
+            return self.explain_last_conclusion()
         conclusion = self.reason_about_question(user_input)
         if conclusion:
             self.last_conclusion = conclusion
@@ -167,7 +170,8 @@ Evidências:
 Você é o módulo de raciocínio estrutural da Athena.
 Você NÃO grava memória diretamente.
 Você NÃO inventa fatos.
-Você NÃO usa conhecimento externo.
+Você usa apenas as evidências estruturadas como fatos de entrada.
+Você pode usar o significado comum dos rótulos relacionais estruturados para inferências convencionais, mas deve citar as evidências usadas.
 Você retorna SOMENTE JSON válido.
 
 Decida se a pergunta exige inferência sobre as evidências.
@@ -235,9 +239,14 @@ Evidências:
         }
 
     def _format_conclusion(self, conclusion):
-        label = {"knowledge": "Eu sei", "belief": "Eu acredito", "hypothesis": "Tenho uma hipótese"}.get(conclusion["category"], "Conclusão")
-        evidence = "\n".join(f"- {item}" for item in conclusion.get("evidence", [])[:5])
-        return f"{label}: {conclusion['statement']}\nConfiança: {conclusion['confidence']:.2f}\nEvidências:\n{evidence}"
+        statement = conclusion["statement"].strip()
+        evidence = conclusion.get("evidence", [])[:5]
+        if not evidence:
+            return statement
+        evidence_text = " ".join(str(item) for item in evidence[:2])
+        if conclusion["category"] == "hypothesis":
+            return f"Minha melhor hipótese é: {statement} Essa inferência vem destas evidências: {evidence_text}"
+        return f"{statement} Essa é uma inferência baseada nas relações que conheço."
 
     def _row_to_line(self, row):
         _id, category, statement, confidence, evidence_json, origin, created_at = row

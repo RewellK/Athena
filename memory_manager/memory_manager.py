@@ -8,11 +8,75 @@ class MemoryManager:
         self.interpreter = interpreter
         self.creator_name = creator_name
 
-    def observe(self, content):
+    def observe(self, content, relevance=None, consolidation_plan=None, follow_up_question=None):
+        if relevance:
+            return self._observe_with_relevance(content, relevance, consolidation_plan, follow_up_question)
+
         interpretation = self.interpreter.interpret(content) if self.interpreter else self._basic_interpret(content)
         score = interpretation.get("importance_score", 0)
-        self.memory.save_short_term_memory(content, score)
+        memory_id = self.memory.save_short_term_memory(content, score)
+        if hasattr(self.memory, "save_memory_relevance"):
+            self.memory.save_memory_relevance(
+                "short_term",
+                memory_id,
+                content,
+                self._interpretation_to_relevance(interpretation),
+                source_message=content,
+            )
         return interpretation
+
+    def _observe_with_relevance(self, content, relevance, consolidation_plan=None, follow_up_question=None):
+        relevance = relevance if isinstance(relevance, dict) else {}
+        plan = consolidation_plan if isinstance(consolidation_plan, dict) else {}
+        score = relevance.get("importance_score", relevance.get("relevance_score", 0))
+        priority = str(relevance.get("memory_priority") or "short")
+        saved_layers = []
+        related_entities = relevance.get("related_entities") if isinstance(relevance.get("related_entities"), list) else []
+
+        if plan.get("store_short_term", priority in {"short", "mid", "long_candidate", "long_confirm"}):
+            memory_id = self.memory.save_short_term_memory(content, score)
+            saved_layers.append("short_term")
+            self.memory.save_memory_relevance(
+                "short_term",
+                memory_id,
+                content,
+                relevance,
+                source_message=content,
+                follow_up_question=follow_up_question,
+            )
+
+        if plan.get("store_mid_term", priority in {"mid", "long_candidate", "long_confirm"}):
+            memory_id = self.memory.save_mid_term_memory(
+                summary=content,
+                topics=related_entities,
+                source_count=1,
+                importance_score=score,
+            )
+            saved_layers.append("mid_term")
+            self.memory.save_memory_relevance(
+                "mid_term",
+                memory_id,
+                content,
+                relevance,
+                source_message=content,
+                follow_up_question=follow_up_question,
+            )
+
+        if plan.get("store_long_term_candidate", priority in {"long_candidate", "long_confirm"}):
+            saved_layers.append(priority)
+            self.memory.save_memory_relevance(
+                priority,
+                None,
+                content,
+                relevance,
+                source_message=content,
+                follow_up_question=follow_up_question,
+                confirmed=False,
+            )
+
+        result = dict(relevance)
+        result["saved_layers"] = saved_layers
+        return result
 
     def maintenance(self):
         expired_short = self.memory.expire_short_term_memory()
@@ -72,6 +136,40 @@ class MemoryManager:
                     "summary": summary,
                     "topics": topics,
                     "reason": "alta recorrência ou importância na memória intermediária"
+                })
+
+        if hasattr(self.memory, "list_long_term_memory_candidates"):
+            for row in self.memory.list_long_term_memory_candidates(limit=20):
+                (
+                    memory_id,
+                    layer,
+                    _layer_id,
+                    content,
+                    _source_message,
+                    relevance_score,
+                    _importance_score,
+                    emotional_score,
+                    relationship_score,
+                    identity_score,
+                    future_score,
+                    memory_priority,
+                    related_entities_json,
+                    confirmation_required,
+                    _confirmed,
+                    _follow_up_question,
+                    reason,
+                    _created_at,
+                ) = row
+                candidates.append({
+                    "id": memory_id,
+                    "summary": content,
+                    "topics": related_entities_json,
+                    "reason": (
+                        reason
+                        or f"prioridade={memory_priority}, relevância={relevance_score}, emoção={emotional_score}, relação={relationship_score}, identidade={identity_score}, futuro={future_score}"
+                    ),
+                    "layer": layer,
+                    "confirmation_required": bool(confirmation_required),
                 })
 
         return candidates
@@ -140,3 +238,35 @@ class MemoryManager:
 
     def _basic_interpret(self, content):
         return {"importance_score": 0, "reason": "interpretação básica", "important": False, "temporary": True}
+
+    def _interpretation_to_relevance(self, interpretation):
+        score = interpretation.get("importance_score", 0)
+        suggested_layer = interpretation.get("suggested_layer")
+        priority = suggested_layer if suggested_layer in {"ignore", "short", "mid", "long_candidate", "long_confirm"} else self._priority_from_score(score)
+        return {
+            "relevance_score": score,
+            "importance_score": score,
+            "emotional_score": interpretation.get("emotional_score", 0),
+            "relationship_score": interpretation.get("relationship_score", 0),
+            "identity_score": interpretation.get("identity_score", 0),
+            "future_score": interpretation.get("future_score", 0),
+            "memory_priority": priority,
+            "related_entities": interpretation.get("related_entities", []),
+            "confirmation_required": bool(interpretation.get("needs_confirmation", priority == "long_confirm")),
+            "reason": interpretation.get("reason", ""),
+        }
+
+    def _priority_from_score(self, score):
+        try:
+            value = int(score)
+        except (TypeError, ValueError):
+            value = 0
+        if value >= 90:
+            return "long_candidate"
+        if value >= 75:
+            return "long_candidate"
+        if value >= 50:
+            return "mid"
+        if value >= 20:
+            return "short"
+        return "ignore"

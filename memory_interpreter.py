@@ -25,10 +25,15 @@ class MemoryInterpreter:
         score = 0 if not is_short and not is_question else -10
         return {
             "importance_score": score,
+            "emotional_score": 0,
+            "relationship_score": 0,
+            "identity_score": 0,
+            "future_score": 0,
             "categories": [],
             "temporary": True,
             "important": False,
             "needs_confirmation": False,
+            "suggested_layer": "ignore" if score <= 0 else "short",
             "reason": "LLM indisponível; fallback não semântico usado para evitar adivinhação.",
         }
 
@@ -40,7 +45,8 @@ class MemoryInterpreter:
             "Você é uma região cognitiva da Athena. A Athena Core é dona da memória.\n"
             "Classifique a relevância da mensagem sem gravar nada.\n"
             "Não use listas fixas de domínios. Interprete semanticamente.\n"
-            "Responda somente JSON com campos: importance_score, categories, temporary, important, needs_confirmation, reason.\n\n"
+            "Responda somente JSON com campos: importance_score, emotional_score, relationship_score, identity_score, future_score, "
+            "categories, temporary, important, needs_confirmation, suggested_layer, reason.\n\n"
             f"Mensagem: {text}"
         )
 
@@ -70,9 +76,35 @@ class MemoryInterpreter:
             categories = [str(categories)]
         return {
             "importance_score": score,
+            "emotional_score": self._score(suggestion.get("emotional_score", 0)),
+            "relationship_score": self._score(suggestion.get("relationship_score", 0)),
+            "identity_score": self._score(suggestion.get("identity_score", 0)),
+            "future_score": self._score(suggestion.get("future_score", 0)),
             "categories": categories,
             "temporary": bool(suggestion.get("temporary", score < 30)),
             "important": bool(suggestion.get("important", score >= 50)),
             "needs_confirmation": bool(suggestion.get("needs_confirmation", 25 <= score < 50)),
+            "suggested_layer": self._normalize_layer(suggestion.get("suggested_layer"), score),
             "reason": str(suggestion.get("reason", "interpretação sem justificativa")),
         }
+
+    def _score(self, value):
+        try:
+            score = int(float(value))
+        except (TypeError, ValueError):
+            score = 0
+        return max(0, min(100, score))
+
+    def _normalize_layer(self, value, score):
+        layer = str(value or "").strip()
+        if layer in {"short", "mid", "long_candidate", "long_confirm", "long", "ignore"}:
+            return "long_candidate" if layer == "long" else layer
+        if score >= 90:
+            return "long_candidate"
+        if score >= 75:
+            return "long_candidate"
+        if score >= 50:
+            return "mid"
+        if score >= 20:
+            return "short"
+        return "ignore"

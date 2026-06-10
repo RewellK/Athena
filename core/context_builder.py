@@ -89,6 +89,18 @@ class ContextBuilder:
             lines.append("Memória intermediária:")
             lines.extend(f"- {row[1]} | fontes={row[3]} | score={row[6]}" for row in mid_rows[:10])
 
+        if hasattr(self.memory, "list_memory_relevance"):
+            relevance_rows = self.memory.list_memory_relevance(limit=10)
+            if relevance_rows:
+                lines.append("Relevância humana recente:")
+                for row in relevance_rows:
+                    _id, layer, _layer_id, content, _source_message, relevance_score, _importance_score, emotional_score, relationship_score, identity_score, future_score, memory_priority, _entities, _confirmation_required, _confirmed, _follow_up, _reason, _created_at = row
+                    lines.append(
+                        f"- {content} | layer={layer} | priority={memory_priority} | "
+                        f"relevance={relevance_score} | emotional={emotional_score} | relationship={relationship_score} | "
+                        f"identity={identity_score} | future={future_score}"
+                    )
+
         return "\n".join(lines)
 
     def _world_model_context(self):
