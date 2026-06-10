@@ -358,9 +358,48 @@ class Athena:
             return self._handle_system_route(intention)
 
         if intention.get("needs_clarification") or intention.get("confidence", 0.0) < 0.45:
+            local_conversation = self._try_local_conversation_fallback(user_input)
+            if local_conversation:
+                return local_conversation
             return "Não entendi com segurança o que você quer agora. Pode me explicar de outro jeito?"
 
         return self._delegate(intention_id, intention, user_input)
+
+    def _try_local_conversation_fallback(self, user_input):
+        """Tiny UX fallback for greetings when intent resolution is unavailable."""
+        words = set(self._normalize_local_phrase(user_input).split())
+        if not words or len(words) > 10:
+            return None
+        greetings = {"oi", "ola", "opa", "eai", "bom", "boa"}
+        small_talk = {"bem", "tranquilo", "tranquila", "tudo"}
+        if words & greetings and words & small_talk:
+            return self.conversation_engine.respond(user_input, {"route": "small_talk"}, self.conversation_context)
+        if words & greetings:
+            return self.conversation_engine.respond(user_input, {"route": "greeting"}, self.conversation_context)
+        return None
+
+    def _normalize_local_phrase(self, text):
+        normalized = str(text or "").strip().lower()
+        replacements = {
+            "á": "a",
+            "à": "a",
+            "ã": "a",
+            "â": "a",
+            "é": "e",
+            "ê": "e",
+            "í": "i",
+            "ó": "o",
+            "ô": "o",
+            "õ": "o",
+            "ú": "u",
+            "ç": "c",
+        }
+        for source, target in replacements.items():
+            normalized = normalized.replace(source, target)
+        chars = []
+        for char in normalized:
+            chars.append(char if char.isalnum() else " ")
+        return " ".join("".join(chars).split())
 
     def _handle_question_about_user(self, intention, user_input, metadata=None):
         target = str(intention.get("target") or "").strip()
@@ -853,7 +892,7 @@ Resultado estruturado do Core:
                 self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "format_learning_natural"})
 
         score = self._as_score(relevance.get("relevance_score", relevance.get("importance_score", 0)))
-        if self._as_score(relevance.get("identity_score", 0)) >= 80:
+        if self._as_score(relevance.get("identity_score", 0)) >= 80 and self._learning_concerns_self(intention, extraction):
             base = "Entendi. Eu ainda não sinto como um humano, mas vou tratar essa informação como importante para minha memória e identidade."
         elif score >= 75 or self._as_score(relevance.get("emotional_score", 0)) >= 70:
             base = "Entendi. Isso parece importante para você, então vou guardar com cuidado."
@@ -862,6 +901,23 @@ Resultado estruturado do Core:
         if follow_up:
             return f"{base} {follow_up}"
         return base
+
+    def _learning_concerns_self(self, intention, extraction):
+        self_name = str(self.identity.get("name") or "Athena").strip().lower()
+        target = str(intention.get("target") or "").strip().lower() if isinstance(intention, dict) else ""
+        target_type = str(intention.get("target_type") or "").strip().lower() if isinstance(intention, dict) else ""
+        if target_type == "self" or (self_name and target == self_name):
+            return True
+        extraction = extraction if isinstance(extraction, dict) else {}
+        for entity in extraction.get("entities", []) or []:
+            if str(entity.get("name") or "").strip().lower() == self_name:
+                return True
+        for relation in extraction.get("relationships", []) or []:
+            source = str(relation.get("source") or "").strip().lower()
+            target = str(relation.get("target") or "").strip().lower()
+            if self_name and self_name in {source, target}:
+                return True
+        return False
 
     def _wants_technical_output(self, intention):
         request = self._structured_request(intention)
@@ -936,7 +992,7 @@ Resultado estruturado do Core:
         return proposal.get("message")
 
     def _handle_pending(self, intention, user_input):
-        intention_type = intention.get("intention_type")
+        intention_type = self._pending_intention_type(intention, user_input)
 
         if self.pending_world_extraction:
             if intention_type == "approval":
@@ -977,6 +1033,41 @@ Resultado estruturado do Core:
             return "Ainda preciso saber se você autoriza o plano proposto."
 
         return None
+
+    def _pending_intention_type(self, intention, user_input):
+        intention_type = intention.get("intention_type") if isinstance(intention, dict) else None
+        if intention_type in {"approval", "rejection"}:
+            return intention_type
+        text = self._normalize_pending_reply(user_input)
+        approvals = {"sim", "s", "yes", "y", "ok", "okay", "pode", "autorizo", "confirmo", "claro"}
+        rejections = {"nao", "não", "n", "no", "negativo", "cancela", "cancelar", "rejeito"}
+        if text in approvals:
+            return "approval"
+        if text in rejections:
+            return "rejection"
+        return intention_type
+
+    def _normalize_pending_reply(self, text):
+        normalized = str(text or "").strip().lower()
+        for source, target in {
+            "á": "a",
+            "à": "a",
+            "ã": "a",
+            "â": "a",
+            "é": "e",
+            "ê": "e",
+            "í": "i",
+            "ó": "o",
+            "ô": "o",
+            "õ": "o",
+            "ú": "u",
+            "ç": "c",
+            ".": "",
+            "!": "",
+            "?": "",
+        }.items():
+            normalized = normalized.replace(source, target)
+        return normalized.strip()
 
     def _pending_state(self):
         if self.pending_world_extraction:

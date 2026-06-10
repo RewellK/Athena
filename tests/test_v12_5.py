@@ -333,6 +333,32 @@ class AthenaV125Tests(unittest.TestCase):
     def relationships(self):
         return {(source, relation, target) for _id, source, relation, target, _confidence, _created_at in self.athena.memory.list_world_relationships()}
 
+    def test_low_confidence_greeting_uses_local_conversation_fallback(self):
+        self.athena.settings.values["useNaturalResponses"] = False
+        intention = {"route": "unknown", "confidence": 0.0, "needs_clarification": True}
+        response = self.athena._delegate_conversation_route("test", intention, "Olá Athena, tudo bem?")
+        self.assertNotIn("Não entendi", response)
+        self.assertIn("Estou", response)
+
+    def test_pending_world_confirmation_accepts_short_approval(self):
+        self.athena.pending_world_extraction = {
+            "text": "Teste de confirmação pendente.",
+            "decision": {"decision": "confirm", "confidence": 0.70, "reason": "teste"},
+            "extraction": {
+                "entities": [{"name": "Entidade Teste", "type": "concept", "confidence": 0.70}],
+                "relationships": [
+                    {"source": "Entidade Teste", "relation": "related_to", "target": "Athena", "confidence": 0.70}
+                ],
+                "events": [],
+                "states": [],
+                "temporal_references": [],
+            },
+        }
+        response = self.athena.chat("Sim")
+        self.assertIn("Atualizei meu World Model", response)
+        self.assertIsNone(self.athena.pending_world_extraction)
+        self.assertIn(("Entidade Teste", "related_to", "Athena"), self.relationships())
+
     def test_v12_5_acceptance_flow(self):
         response = self.athena.chat("Meu pai é o Francisco.")
         self.assertIn("Francisco", response)
