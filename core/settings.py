@@ -6,7 +6,7 @@ DEFAULT_SETTINGS = {
     "useLLM": True,
     "ollamaUrl": "http://localhost:11434/api/generate",
     "ollamaModel": "qwen2.5:3b",
-    "voiceEnabled": False,
+    "voiceEnabled": True,
     "voiceProvider": "piper",
     "fallbackVoiceProvider": "macos_say",
     "piperCommand": "piper",
@@ -23,7 +23,13 @@ DEFAULT_SETTINGS = {
     "allowCognitiveRegex": False,
     "allowIntentKeywordRules": False,
     "orchestratorInterpretsMeaning": False,
-    "foundationLockdown": True
+    "foundationLockdown": True,
+    "desktopGuiEnabled": True,
+    "officialRepositoryUrl": "https://github.com/RewellK/Athena/",
+    "projectRoot": ".",
+    "gitReadOnly": True,
+    "selfCodeAwarenessEnabled": True,
+    "gitAwarenessEnabled": True
 }
 
 
@@ -54,3 +60,10 @@ class Settings:
 
     def get(self, key, default=None):
         return self.values.get(key, default)
+
+    def set(self, key, value):
+        self.values[key] = value
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, "w", encoding="utf-8") as file:
+            json.dump(self.values, file, indent=4, ensure_ascii=False)
+        return value

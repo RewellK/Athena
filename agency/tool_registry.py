@@ -40,6 +40,22 @@ class ToolRegistry:
             "latency": 0.20,
             "success_rate": 0.75,
         },
+        {
+            "id": "self_code_awareness_read",
+            "capability": "read local project structure and summarize operational code body",
+            "confidence": 0.85,
+            "cost": 0.05,
+            "latency": 0.10,
+            "success_rate": 0.75,
+        },
+        {
+            "id": "git_awareness_read_only",
+            "capability": "read git repository status branch history diff and tracked files without modifying repository",
+            "confidence": 0.90,
+            "cost": 0.05,
+            "latency": 0.10,
+            "success_rate": 0.80,
+        },
     ]
 
     def __init__(self, memory):

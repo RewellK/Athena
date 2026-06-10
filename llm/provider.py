@@ -46,3 +46,19 @@ class OllamaProvider:
             if self.logger:
                 self.logger.log("LLM_UNAVAILABLE", str(error))
             return LLMResult(False, "", str(error))
+
+
+    def health_check(self):
+        if not self.settings.get("useLLM", True):
+            return {"available": False, "status": "desativada", "error": "useLLM=false"}
+        url = str(self.settings.get("ollamaUrl") or "")
+        base = url.split("/api/")[0] if "/api/" in url else url.rstrip("/")
+        tags_url = base.rstrip("/") + "/api/tags"
+        try:
+            with urllib.request.urlopen(tags_url, timeout=2) as response:
+                response.read()
+                return {"available": True, "status": "ativa", "error": ""}
+        except Exception as error:
+            if self.logger:
+                self.logger.log("LLM_HEALTH_UNAVAILABLE", str(error))
+            return {"available": False, "status": "inativa", "error": str(error)}

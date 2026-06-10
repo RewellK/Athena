@@ -21,5 +21,11 @@
     "allowCognitiveRegex": false,
     "allowIntentKeywordRules": false,
     "orchestratorInterpretsMeaning": false,
-    "foundationLockdown": true
+    "foundationLockdown": true,
+    "desktopGuiEnabled": true,
+    "officialRepositoryUrl": "https://github.com/RewellK/Athena/",
+    "projectRoot": ".",
+    "gitReadOnly": true,
+    "selfCodeAwarenessEnabled": true,
+    "gitAwarenessEnabled": true
 }

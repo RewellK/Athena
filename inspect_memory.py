@@ -1,4 +1,7 @@
 from memory.database import MemoryDB
+from core.settings import Settings
+from git_awareness.git_awareness_engine import GitAwarenessEngine
+from self_code_awareness.self_code_awareness_engine import SelfCodeAwarenessEngine
 
 
 def inspect():
@@ -154,6 +157,15 @@ def inspect():
     print(f"Planos V11: {len(db.list_plans(limit=100000))}")
     print(f"Ações V11: {len(db.list_actions(limit=100000))}")
     print(f"Outcomes V11: {len(db.list_outcomes(limit=100000))}")
+
+    print("\n=== SELF CODE AWARENESS V12 ===\n")
+    settings = Settings()
+    git_engine = GitAwarenessEngine(settings.get("projectRoot", "."), settings.get("officialRepositoryUrl"))
+    self_code = SelfCodeAwarenessEngine(settings.get("projectRoot", "."), settings=settings, git_reader=git_engine.repository_reader)
+    print(self_code.respond({"operation": "snapshot"}))
+
+    print("\n=== GIT READ AWARENESS V12 ===\n")
+    print(git_engine.respond({"operation": "summary"}))
 
 
 if __name__ == "__main__":

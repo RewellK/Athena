@@ -19,6 +19,8 @@ class IntentionEngine:
         "reasoning_request",
         "curiosity_request",
         "knowledge_source_request",
+        "self_code_request",
+        "git_awareness_request",
         "agency_request",
         "approval",
         "rejection",
@@ -33,6 +35,8 @@ class IntentionEngine:
         "self_model",
         "curiosity",
         "knowledge_sources",
+        "self_code_awareness",
+        "git_awareness",
         "agency",
         "conversation",
         "none",
@@ -80,12 +84,18 @@ Se a intenção for ambígua, reduza confidence e defina needs_clarification=tru
 
 Tipos permitidos:
 conversation, knowledge_input, question, reflection_request, self_model_request,
-reasoning_request, curiosity_request, knowledge_source_request, agency_request,
+reasoning_request, curiosity_request, knowledge_source_request, self_code_request, git_awareness_request, agency_request,
 approval, rejection, correction, unknown
 
 Rotas permitidas:
 world_model, reasoning, reflection, self_model, curiosity, knowledge_sources,
-agency, conversation, none
+self_code_awareness, git_awareness, agency, conversation, none
+
+
+Para self_code_awareness, use structured_request.operation como uma operação genérica entre:
+body, modules, capabilities, limitations, weakest_area, version_changes, snapshot.
+Para git_awareness, use structured_request.operation como uma operação genérica entre:
+summary, status, branch, history, diff, tracked_files, read_only_policy, ou uma operação solicitada se for mutação.
 
 Schema obrigatório:
 {{
@@ -100,7 +110,8 @@ Schema obrigatório:
   "rationale": "string",
   "approval_target": "string_or_empty",
   "structured_request": {{}},
-  "candidate_tools": ["capability_or_empty"]
+  "candidate_tools": ["capability_or_empty"],
+  "operation": "optional_generic_operation_name"
 }}
 
 Contexto persistente resumido:
@@ -135,6 +146,7 @@ Mensagem do usuário:
             "approval_target": str(parsed.get("approval_target") or "").strip(),
             "structured_request": parsed.get("structured_request") if isinstance(parsed.get("structured_request"), dict) else {},
             "candidate_tools": [str(item).strip() for item in ensure_list(parsed.get("candidate_tools")) if str(item).strip()],
+            "operation": str(parsed.get("operation") or "").strip(),
             "source": "llm_structural_intention",
         }
 
@@ -152,6 +164,7 @@ Mensagem do usuário:
             "approval_target": "",
             "structured_request": {},
             "candidate_tools": [],
+            "operation": "",
             "source": "intention_unknown",
         }
 

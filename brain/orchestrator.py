@@ -12,6 +12,7 @@ from core.logger import AthenaLogger
 from core.settings import Settings
 from curiosity.curiosity_engine import CuriosityEngine
 from forgetting_engine import ForgettingEngine
+from git_awareness.git_awareness_engine import GitAwarenessEngine
 from knowledge_sources.knowledge_ingestion_engine import KnowledgeIngestionEngine
 from learning.learning_engine import LearningEngine
 from llm.provider import OllamaProvider
@@ -21,6 +22,7 @@ from memory_manager.memory_manager import MemoryManager
 from reasoning.reasoning_engine import ReasoningEngine
 from reflection.reflection_engine import ReflectionEngine
 from self_model.self_model import SelfModel
+from self_code_awareness.self_code_awareness_engine import SelfCodeAwarenessEngine
 from voice.voice_engine import VoiceEngine
 from world_model.world_model import WorldModel
 
@@ -46,6 +48,15 @@ class Athena:
         self.settings = Settings()
         self.context_builder = ContextBuilder(self.memory, self.identity)
         self.llm_provider = OllamaProvider(self.settings, self.logger)
+        self.git_awareness_engine = GitAwarenessEngine(
+            self.settings.get("projectRoot", "."),
+            self.settings.get("officialRepositoryUrl", "https://github.com/RewellK/Athena/"),
+        )
+        self.self_code_awareness_engine = SelfCodeAwarenessEngine(
+            self.settings.get("projectRoot", "."),
+            settings=self.settings,
+            git_reader=self.git_awareness_engine.repository_reader,
+        )
 
         self.tool_registry = ToolRegistry(self.memory)
         self.tool_registry.bootstrap()
@@ -130,6 +141,12 @@ class Athena:
         if route == "knowledge_sources":
             return self._handle_knowledge_source_route(intention, user_input)
 
+        if route == "self_code_awareness":
+            return self._handle_self_code_route(intention)
+
+        if route == "git_awareness":
+            return self._handle_git_route(intention)
+
         if route == "world_model":
             return self._handle_world_route(intention, user_input)
 
@@ -151,6 +168,12 @@ class Athena:
         if intention.get("intention_type") == "knowledge_input":
             return self._handle_world_route(intention, user_input)
 
+        if intention.get("intention_type") == "self_code_request":
+            return self._handle_self_code_route(intention)
+
+        if intention.get("intention_type") == "git_awareness_request":
+            return self._handle_git_route(intention)
+
         if intention.get("intention_type") == "reflection_request":
             return self.reflection_engine.respond(user_input)
 
@@ -161,6 +184,22 @@ class Athena:
             return self.reasoning_engine.respond(user_input)
 
         return None
+
+
+    def _handle_self_code_route(self, intention):
+        request = self._structured_request(intention)
+        return self.self_code_awareness_engine.respond(request)
+
+    def _handle_git_route(self, intention):
+        request = self._structured_request(intention)
+        return self.git_awareness_engine.respond(request)
+
+    def _structured_request(self, intention):
+        request = intention.get("structured_request") if isinstance(intention.get("structured_request"), dict) else {}
+        if intention.get("operation") and not request.get("operation"):
+            request = dict(request)
+            request["operation"] = intention.get("operation")
+        return request
 
     def _handle_world_route(self, intention, user_input):
         response = self.world_model.answer(user_input)
@@ -289,6 +328,46 @@ Mensagem do usuário:
             if result.available and result.text:
                 return result.text.strip()
         return "Minha LLM local não está disponível agora, mas continuo funcional com minha memória interna. Pode me dar mais contexto?"
+
+
+    def get_desktop_status(self):
+        llm_health = self.llm_provider.health_check()
+        voice_status = self.voice_engine.status()
+        git_summary = self.git_awareness_engine.summary()
+        git_text = "indisponível"
+        if git_summary.get("git_available") and git_summary.get("is_git_repository"):
+            git_text = f"repo local / branch {git_summary.get('current_branch')}"
+        elif git_summary.get("git_available"):
+            git_text = "git disponível, sem repo local"
+        return {
+            "llm": {
+                "status": llm_health.get("status"),
+                "model": self.settings.get("ollamaModel"),
+                "error": llm_health.get("error", ""),
+            },
+            "voice": voice_status,
+            "memory": {
+                "memories": self.memory.count_memories(),
+                "short_term": self.memory.count_short_term_memory(),
+                "mid_term": self.memory.count_mid_term_memory(),
+                "long_term": self.memory.count_real_long_term_memory(),
+            },
+            "world": {
+                "entities": self.memory.count_entities(),
+                "relationships": self.memory.count_world_relationships(),
+                "events": self.memory.count_world_events(),
+                "states": self.memory.count_entity_states(),
+            },
+            "agency": {
+                "intentions": len(self.memory.list_intentions(limit=100000)),
+                "plans": len(self.memory.list_plans(limit=100000)),
+                "actions": len(self.memory.list_actions(limit=100000)),
+            },
+            "git": {
+                "summary": git_text,
+                "details": git_summary,
+            },
+        }
 
     def _format_world_saved(self, saved):
         parts = []

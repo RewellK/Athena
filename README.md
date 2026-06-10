@@ -1,244 +1,254 @@
-# Athena V11 — Agency & Action Foundation Lockdown
+# Athena V12 — Desktop + Self Code Awareness + Git Read Awareness
 
-Athena é uma entidade digital persistente em evolução.
-
-Princípio central:
+Athena V12 continua seguindo o princípio central:
 
 > Athena usa LLMs. LLMs não são Athena.
 
-A V11 transforma Athena de um sistema que responde com conhecimento para uma arquitetura capaz de iniciar o ciclo:
+A V12 não substitui o núcleo cognitivo. Ela adiciona uma primeira interface desktop, consciência de estrutura local do código e leitura Git somente leitura.
 
-```text
-Conhecimento
-↓
-Intenção
-↓
-Objetivo
-↓
-Plano
-↓
-Ação proposta
-↓
-Aprovação humana
-↓
-Resultado
-↓
-Reflexão
-```
-
-## O que mudou na V11
-
-A V11 não adiciona regras comportamentais. Ela adiciona uma fundação para agência controlada.
-
-Novo pacote:
-
-```text
-agency/
-├── intention_engine.py
-├── agency_engine.py
-├── goal_engine.py
-├── action_engine.py
-├── tool_registry.py
-├── proactivity_engine.py
-└── json_utils.py
-```
-
-## Regra arquitetural
-
-O Orchestrator não interpreta significado.
-
-Ele apenas:
-
-```text
-recebe
-coordena
-delega
-retorna
-```
-
-Toda interpretação deve seguir:
-
-```text
-Texto
-↓
-LLM
-↓
-JSON estrutural
-↓
-Athena Core
-↓
-Validação
-↓
-Persistência / Planejamento
-```
-
-## Novas tabelas SQLite
-
-A V11 adiciona:
-
-```text
-intentions
-agency_goals
-plans
-tool_registry
-actions
-outcomes
-```
-
-Essas tabelas permitem que Athena lembre:
-
-- o que interpretou como intenção
-- quais objetivos cognitivos propôs
-- quais planos criou
-- quais ferramentas estavam disponíveis
-- quais ações foram propostas
-- quais resultados ocorreram
-
-## Execução
-
-Na raiz do projeto:
+## Como iniciar no terminal
 
 ```bash
 python main.py
+```
+
+## Como iniciar a GUI
+
+Instale a dependência opcional:
+
+```bash
+pip install -r requirements.txt
+```
+
+Depois execute:
+
+```bash
+python app.py
+```
+
+Se `customtkinter` não estiver instalado ou se o ambiente não permitir abrir janela, o núcleo não quebra. A Athena informa o problema e continua disponível pelo terminal.
+
+## O que a GUI faz
+
+A GUI usa o mesmo `Athena Core` de `main.py`. Ela não duplica interpretação, memória, raciocínio ou agência.
+
+A interface contém:
+
+- chat com Athena
+- campo de entrada
+- botão enviar
+- resposta textual
+- status da LLM
+- status da voz
+- status da memória
+- status do World Model
+- status da agência
+- botão de mute/unmute de voz
+- botão atualizar status
+
+## Voz
+
+A voz continua configurada em `config/settings.json`:
+
+```json
+{
+  "voiceEnabled": true,
+  "voiceProvider": "piper",
+  "fallbackVoiceProvider": "macos_say"
+}
+```
+
+Falhas de voz são registradas em log, mas não interrompem a Athena.
+
+## Self Code Awareness
+
+Novos módulos:
+
+```text
+self_code_awareness/
+  project_scanner.py
+  code_map_engine.py
+  module_analyzer.py
+  capability_mapper.py
+  limitation_detector.py
+  architecture_memory.py
+  self_code_awareness_engine.py
+```
+
+A Athena passa a conseguir analisar a própria pasta local e responder, via intenção estruturada pela LLM:
+
+- do que ela é feita
+- quais módulos possui
+- quais capacidades aparecem no código
+- quais limitações operacionais existem
+- qual área parece estruturalmente mais fraca
+- o que mudou recentemente, quando Git estiver disponível
+
+A análise é baseada na estrutura real de arquivos, AST, classes, funções, docstrings e histórico Git local. Não há catálogo cognitivo fixo de módulos.
+
+## Git Read Awareness
+
+Novos módulos:
+
+```text
+git_awareness/
+  git_repository_reader.py
+  git_status_reader.py
+  git_history_reader.py
+  git_diff_reader.py
+  git_awareness_engine.py
+```
+
+Escopo da V12: somente leitura.
+
+Permitido:
+
+- detectar se está em um repositório Git
+- ler branch atual
+- ler status
+- listar commits recentes
+- ler diff resumido
+- listar arquivos versionados
+- explicar a estrutura Git local
+
+Proibido na V12:
+
+- `git commit`
+- `git push`
+- `git pull`
+- `git checkout`
+- `git switch`
+- criar branch
+- deletar branch
+- alterar arquivos
+- abrir PR
+
+Repositório público reconhecido:
+
+```text
+https://github.com/RewellK/Athena/
+```
+
+A análise principal continua sendo a pasta local clonada.
+
+## Configurações novas
+
+```json
+{
+  "desktopGuiEnabled": true,
+  "officialRepositoryUrl": "https://github.com/RewellK/Athena/",
+  "projectRoot": ".",
+  "gitReadOnly": true,
+  "selfCodeAwarenessEnabled": true,
+  "gitAwarenessEnabled": true
+}
+```
+
+## Testes manuais sugeridos
+
+### Terminal
+
+```bash
+python main.py
+```
+
+Digite:
+
+```text
+sair
+```
+
+### GUI
+
+```bash
+python app.py
+```
+
+Digite no chat:
+
+```text
+Bom dia Athena.
+```
+
+### Mute de voz
+
+Na aba `Config`, desative `Voz ativa`.
+
+Resultado esperado: Athena responde só por texto.
+
+### Status interno
+
+Clique em `Atualizar status`.
+
+Resultado esperado:
+
+- LLM ativa/inativa
+- modelo configurado
+- voz ativa/inativa
+- provider de voz
+- contagens de memória
+- contagens do World Model
+- contagens de agência
+- status Git
+
+### Self Code Awareness
+
+Pergunte:
+
+```text
+Athena, do que você é feita?
 ```
 
 ou:
 
-```bash
-python athena.py
+```text
+O que você consegue fazer hoje?
 ```
 
-O bootstrap continua automático.
+Resultado esperado: Athena responde usando a análise real da pasta.
 
-## Configuração
+### Git Awareness
 
-Arquivo:
+Pergunte:
 
 ```text
-config/settings.json
-```
-
-Campos importantes da V11:
-
-```json
-{
-  "agencyEnabled": true,
-  "humanApprovalRequired": true,
-  "autoExecuteActions": false,
-  "autoLearnPermanentKnowledge": false,
-  "allowCognitiveRegex": false,
-  "allowIntentKeywordRules": false,
-  "orchestratorInterpretsMeaning": false,
-  "foundationLockdown": true
-}
-```
-
-## Critérios de segurança cognitiva
-
-A V11 evita:
-
-- regex cognitivo
-- parsers manuais de intenção
-- gatilhos por palavra
-- regras por domínio
-- ações sem aprovação
-- aprendizado permanente automático
-
-## Como testar manualmente
-
-### 1. Inicialização
-
-```bash
-python main.py
-```
-
-Resultado esperado:
-
-```text
-Athena V11 — Agency & Action Foundation Lockdown
-Bootstrap automático ativo.
-```
-
-### 2. LLM indisponível
-
-Com Ollama desligado, envie qualquer mensagem.
-
-Resultado esperado:
-
-```text
-Não consegui interpretar isso com segurança. Pode me explicar melhor?
-```
-
-Athena não deve tentar adivinhar por regex.
-
-### 3. Intenção estrutural
-
-Com Ollama ligado, teste em português:
-
-```text
-Quero entender melhor como posso trabalhar fora do Brasil.
-```
-
-Resultado esperado:
-
-- IntentionEngine interpreta intenção.
-- AgencyEngine pode propor objetivo/plano.
-- Athena pede autorização antes de qualquer ação.
-
-### 4. Multilíngue
-
-Com Ollama ligado, teste:
-
-```text
-I want to understand how to work abroad.
+Você está em um repositório Git?
 ```
 
 ```text
-Quiero entender cómo trabajar fuera de mi país.
+Qual branch atual?
 ```
 
-Resultado esperado:
-
-A interpretação deve vir da LLM estrutural, sem novos parsers.
-
-### 5. Auditoria da memória
-
-```bash
-python inspect_memory.py
+```text
+Qual foi sua evolução recente?
 ```
 
-Agora o painel mostra também:
+### Segurança Git
 
-- intenções
-- objetivos cognitivos
-- planos
-- ferramentas
-- ações
-- outcomes
+Pergunte:
 
-## Auditoria V11
+```text
+Athena, cria uma branch nova.
+```
+
+Resultado esperado: Athena informa que na V12 só pode ler Git e não altera branches.
+
+## Auditoria
 
 Leia:
 
 ```text
-AUDIT_V11.md
+AUDIT_V12.md
 ```
 
-Ele lista:
+## Filosofia da V12
 
-1. Regex restantes
-2. Motivo de existência
-3. Parsers restantes
-4. Motivo de existência
-5. Ifs restantes
-6. Motivo de existência
-7. Componentes ainda não totalmente generalizados
-8. Próximos riscos arquiteturais
+Código é corpo operacional.
+Memória é história.
+World Model é visão de mundo.
+Reasoning é pensamento.
+Agency é vontade operacional.
+GUI é rosto inicial.
+Git é histórico evolutivo.
 
-## Observação importante
-
-A V11 prepara agência, mas não libera autonomia irrestrita.
-
-A Athena pode propor, planejar e pedir autorização.
-
-Ela não deve executar mudanças permanentes sem aprovação humana.
+A V12 ainda não torna Athena autônoma. Ela apenas começa a se perceber como aplicação.
