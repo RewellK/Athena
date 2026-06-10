@@ -1,14 +1,112 @@
 import hashlib
 import json
+import os
 import sqlite3
+import threading
 from datetime import datetime, timedelta
+
+
+class ThreadSafeCursor:
+    """Cursor proxy that serializes access to the underlying SQLite cursor."""
+
+    def __init__(self, cursor, lock):
+        self._cursor = cursor
+        self._lock = lock
+
+    def execute(self, *args, **kwargs):
+        with self._lock:
+            self._cursor.execute(*args, **kwargs)
+        return self
+
+    def executemany(self, *args, **kwargs):
+        with self._lock:
+            self._cursor.executemany(*args, **kwargs)
+        return self
+
+    def fetchone(self):
+        with self._lock:
+            return self._cursor.fetchone()
+
+    def fetchall(self):
+        with self._lock:
+            return self._cursor.fetchall()
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
+
+class ThreadSafeConnection:
+    """SQLite connection proxy safe for Athena Desktop background threads.
+
+    check_same_thread=False allows use across GUI/background threads.
+    This proxy adds an RLock so execute/commit/fetch operations do not run
+    concurrently on the same connection.
+    """
+
+    def __init__(self, connection, lock):
+        self._connection = connection
+        self._lock = lock
+
+    def execute(self, *args, **kwargs):
+        with self._lock:
+            return ThreadSafeCursor(self._connection.execute(*args, **kwargs), self._lock)
+
+    def executemany(self, *args, **kwargs):
+        with self._lock:
+            return ThreadSafeCursor(self._connection.executemany(*args, **kwargs), self._lock)
+
+    def cursor(self):
+        with self._lock:
+            return ThreadSafeCursor(self._connection.cursor(), self._lock)
+
+    def commit(self):
+        with self._lock:
+            self._connection.commit()
+
+    def rollback(self):
+        with self._lock:
+            self._connection.rollback()
+
+    def close(self):
+        with self._lock:
+            self._connection.close()
+
+    def pragma(self, statement):
+        with self._lock:
+            self._connection.execute(statement)
 
 
 class MemoryDB:
 
     def __init__(self, db_name="knowledge.db"):
-        self.conn = sqlite3.connect(db_name)
+        self.db_name = db_name
+        self._lock = threading.RLock()
+        parent = os.path.dirname(os.path.abspath(db_name))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        raw_connection = sqlite3.connect(
+            db_name,
+            check_same_thread=False,
+            timeout=30,
+            isolation_level=None,
+        )
+        self.conn = ThreadSafeConnection(raw_connection, self._lock)
+        self._configure_connection()
         self.create_tables()
+
+    def _configure_connection(self):
+        self.conn.pragma("PRAGMA journal_mode=WAL")
+        self.conn.pragma("PRAGMA synchronous=NORMAL")
+        self.conn.pragma("PRAGMA busy_timeout=30000")
+        self.conn.pragma("PRAGMA foreign_keys=ON")
+
+    def close(self):
+        self.conn.close()
 
     def create_tables(self):
         self.conn.execute("""

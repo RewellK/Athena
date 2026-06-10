@@ -4,10 +4,10 @@ from brain.orchestrator import Athena
 def main():
     athena = Athena()
 
-    print("Athena V12 — Desktop + Self Code Awareness + Git Read Awareness")
+    print("Athena V12.2 — Conversational Maturity & Core Stabilization")
     print("Digite 'sair' para encerrar.")
     print("Bootstrap automático ativo.")
-    print("Orchestrator em modo lockdown: terminal e GUI usam o mesmo Athena Core.")
+    print("Conversation-first ativo: terminal e GUI usam o mesmo Athena Core.")
 
     while True:
         user_input = input("\nVocê: ")

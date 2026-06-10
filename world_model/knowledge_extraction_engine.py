@@ -179,7 +179,7 @@ Texto do usuário:
         if not isinstance(extraction, dict):
             return normalized
 
-        for entity in extraction.get("entities", []):
+        for entity in self._as_list(extraction.get("entities")) :
             if not isinstance(entity, dict):
                 continue
             name = self._clean_text(entity.get("name"))
@@ -194,7 +194,7 @@ Texto do usuário:
                 "confidence": self._normalize_confidence(entity.get("confidence")),
             })
 
-        for relationship in extraction.get("relationships", []):
+        for relationship in self._as_list(extraction.get("relationships")) :
             if not isinstance(relationship, dict):
                 continue
             source_name = self._clean_text(relationship.get("source"))
@@ -209,13 +209,13 @@ Texto do usuário:
                 "confidence": self._normalize_confidence(relationship.get("confidence")),
             })
 
-        for event in extraction.get("events", []):
+        for event in self._as_list(extraction.get("events")) :
             if not isinstance(event, dict):
                 continue
             event_type = self._clean_label(event.get("type") or event.get("event_type") or "generic_event")
             name = self._clean_text(event.get("name")) or self._build_generic_event_name(event_type, event)
             participants = []
-            for participant in event.get("participants", []):
+            for participant in self._as_list(event.get("participants")) :
                 if not isinstance(participant, dict):
                     continue
                 entity = self._clean_text(participant.get("entity") or participant.get("person"))
@@ -231,7 +231,7 @@ Texto do usuário:
                 "confidence": self._normalize_confidence(event.get("confidence")),
             })
 
-        for state in extraction.get("states", []):
+        for state in self._as_list(extraction.get("states")) :
             if not isinstance(state, dict):
                 continue
             entity = self._clean_text(state.get("entity"))
@@ -247,7 +247,7 @@ Texto do usuário:
                 "confidence": self._normalize_confidence(state.get("confidence")),
             })
 
-        for temporal in extraction.get("temporal_references", []):
+        for temporal in self._as_list(extraction.get("temporal_references")) :
             if not isinstance(temporal, dict):
                 continue
             text = self._clean_text(temporal.get("text"))
@@ -262,6 +262,32 @@ Texto do usuário:
 
         self._deduplicate(normalized)
         return normalized
+
+    def _as_list(self, value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            return [value]
+        return []
+
+    def _build_generic_event_name(self, event_type, event):
+        event_type = self._clean_label(event_type or "generic_event")
+        participants = []
+        for participant in self._as_list(event.get("participants")) if isinstance(event, dict) else []:
+            if isinstance(participant, dict):
+                entity = self._clean_text(participant.get("entity") or participant.get("person"))
+                if entity:
+                    participants.append(entity)
+        date = self._clean_text(event.get("date")) if isinstance(event, dict) else ""
+        base_parts = [event_type]
+        if participants:
+            base_parts.append("_".join(self._clean_label(item) for item in participants[:3]))
+        if date:
+            base_parts.append(self._clean_label(date))
+        name = "_".join(part for part in base_parts if part).strip("_")
+        return name or "generic_event"
 
     def _clean_text(self, value):
         if value is None:

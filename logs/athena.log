@@ -1,1 +1,157 @@
-[2026-06-10T18:26:27] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:12] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:12] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:12] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:12] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:12] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:12] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:12] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:12] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:12] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:12] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:12] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:12] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:12] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:12] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:12] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:12] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:13] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:13] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:13] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:13] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:13] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:13] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:13] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:13] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:13] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:13] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:13] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:38] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:38] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:38] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:38] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:38] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:38] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:38] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:38] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:38] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:38] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:38] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:38] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:38] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:38] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:38] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:38] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:38] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:04:56] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:04:56] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:04:56] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:05:03] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:05:03] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:05:03] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:05:03] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:05:03] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:05:03] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:05:03] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:05:03] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:05:03] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:05:03] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:05:03] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:05:03] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:06:31] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:06:31] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:06:31] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:06:31] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:06:31] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:06:31] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:06:31] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [LLM_HEALTH_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:06:31] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:06:31] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:06:31] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:06:31] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:06:31] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:06:31] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:06:31] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'
+[2026-06-10T19:06:31] [LLM_UNAVAILABLE] <urlopen error [Errno 111] Connection refused>
+[2026-06-10T19:06:31] [VOICE_PROVIDER_FAILED] piper: piperModelPath não configurado em config/settings.json
+[2026-06-10T19:06:31] [VOICE_FALLBACK_FAILED] macos_say: [Errno 2] No such file or directory: 'say'

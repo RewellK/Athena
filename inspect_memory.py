@@ -1,5 +1,7 @@
 from memory.database import MemoryDB
 from core.settings import Settings
+from error_awareness.error_capture import ErrorCapture
+from core.logger import AthenaLogger
 from git_awareness.git_awareness_engine import GitAwarenessEngine
 from self_code_awareness.self_code_awareness_engine import SelfCodeAwarenessEngine
 
@@ -157,6 +159,18 @@ def inspect():
     print(f"Planos V11: {len(db.list_plans(limit=100000))}")
     print(f"Ações V11: {len(db.list_actions(limit=100000))}")
     print(f"Outcomes V11: {len(db.list_outcomes(limit=100000))}")
+
+
+    print("\n=== ERROR AWARENESS V12.1 ===\n")
+    last_error = ErrorCapture(AthenaLogger()).last_error()
+    if last_error:
+        analysis = last_error.get("analysis", {})
+        print(f"Último erro: {analysis.get('title', last_error.get('error_type'))}")
+        print(f"Gravidade: {analysis.get('severity', 'médio')}")
+        print(f"Módulo provável: {analysis.get('probable_module', 'não identificado')}")
+        print(f"Explicação: {analysis.get('friendly_explanation', '')}")
+    else:
+        print("Nenhum erro registrado em logs/last_error.json.")
 
     print("\n=== SELF CODE AWARENESS V12 ===\n")
     settings = Settings()

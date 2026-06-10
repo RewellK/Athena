@@ -10,9 +10,18 @@ from bootstrap import AthenaBootstrap
 from core.context_builder import ContextBuilder
 from core.logger import AthenaLogger
 from core.settings import Settings
+from conversation.capability_engine import CapabilityEngine
+from conversation.conversation_context import ConversationContext
+from conversation.conversation_engine import ConversationEngine
+from conversation.conversation_router import ConversationRouter
+from conversation.identity_engine import IdentityEngine
+from conversation.self_status_engine import SelfStatusEngine
 from curiosity.curiosity_engine import CuriosityEngine
+from error_awareness.error_capture import ErrorCapture
+from error_awareness.error_reporter import ErrorReporter
 from forgetting_engine import ForgettingEngine
 from git_awareness.git_awareness_engine import GitAwarenessEngine
+from health.health_engine import HealthEngine
 from knowledge_sources.knowledge_ingestion_engine import KnowledgeIngestionEngine
 from learning.learning_engine import LearningEngine
 from llm.provider import OllamaProvider
@@ -29,15 +38,17 @@ from world_model.world_model import WorldModel
 
 class Athena:
     """
-    V11 Orchestrator lockdown.
+    V12.2 conversation-first orchestrator.
 
-    The Orchestrator does not interpret language, intent, or meaning.
-    It receives text, asks IntentionEngine for structure, delegates to modules,
-    and returns the selected module response.
+    The Orchestrator coordinates and delegates. It does not perform knowledge
+    extraction as the entry point. Every user message first passes through the
+    Conversation Router; only the learning route reaches Knowledge Extraction.
     """
 
     def __init__(self):
         self.logger = AthenaLogger()
+        self.error_capture = ErrorCapture(self.logger)
+        self.error_reporter = ErrorReporter()
         self.memory = MemoryDB()
         AthenaBootstrap(self.memory).run()
 
@@ -103,17 +114,52 @@ class Athena:
         self.forgetting_engine = ForgettingEngine(self.memory)
         self.voice_engine = VoiceEngine(self.settings, self.logger)
 
+        self.health_engine = HealthEngine(
+            memory=self.memory,
+            llm_provider=self.llm_provider,
+            voice_engine=self.voice_engine,
+            git_awareness_engine=self.git_awareness_engine,
+            error_capture=self.error_capture,
+        )
+        self.conversation_context = ConversationContext()
+        self.conversation_router = ConversationRouter(self.llm_provider, self.context_builder, self.logger)
+        self.conversation_engine = ConversationEngine(
+            identity=self.identity,
+            llm_provider=self.llm_provider,
+            context_builder=self.context_builder,
+            health_engine=self.health_engine,
+            logger=self.logger,
+        )
+        self.identity_engine = IdentityEngine(self.identity, self.self_model)
+        self.capability_engine = CapabilityEngine(
+            self_code_awareness_engine=self.self_code_awareness_engine,
+            git_awareness_engine=self.git_awareness_engine,
+            voice_engine=self.voice_engine,
+            settings=self.settings,
+        )
+        self.self_status_engine = SelfStatusEngine(self.health_engine, self.error_capture)
+
         self.pending_world_extraction = None
         self.pending_knowledge_ingestion = None
         self.pending_plan = None
 
     def chat(self, user_input):
-        self.memory.save_memory("conversation", user_input)
-        self.memory_manager.observe(user_input)
-        self.memory_manager.maintenance()
+        try:
+            return self._chat_impl(user_input)
+        except Exception as error:
+            return self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "chat"})
+
+    def _chat_impl(self, user_input):
+        self.conversation_context.add_user_message(user_input)
 
         pending_state = self._pending_state()
-        intention = self.intention_engine.interpret(user_input, pending_state=pending_state)
+        route_result = self.conversation_router.route(
+            user_input,
+            session_context=self.conversation_context,
+            pending_state=pending_state,
+        )
+
+        intention = self._route_to_intention(route_result, user_input)
         intention_id = self.memory.save_intention(
             user_input,
             intention,
@@ -123,23 +169,168 @@ class Athena:
 
         pending_response = self._handle_pending(intention, user_input)
         if pending_response:
-            return self._speak(pending_response)
+            return self._finalize_response(pending_response, route_result)
+
+        response = self._delegate_conversation_route(intention_id, intention, user_input)
+        if response:
+            return self._finalize_response(response, route_result)
+
+        fallback = self.conversation_engine.respond(user_input, route_result, self.conversation_context)
+        return self._finalize_response(fallback, route_result)
+
+    def _route_to_intention(self, route_result, user_input):
+        route_result = route_result if isinstance(route_result, dict) else {}
+        route = route_result.get("route", "unknown")
+        structured_request = route_result.get("structured_request") if isinstance(route_result.get("structured_request"), dict) else {}
+        operation = structured_request.get("operation") or route_result.get("intent") or route
+
+        intention_type_by_route = {
+            "greeting": "conversation",
+            "small_talk": "conversation",
+            "identity": "self_model_request",
+            "capability": "self_code_request",
+            "self_status": "self_model_request",
+            "memory_query": "reflection_request",
+            "world_query": "question",
+            "reasoning": "reasoning_request",
+            "learning": "knowledge_input",
+            "agency": "agency_request",
+            "system": "question",
+            "error_query": "error_awareness_request",
+            "conversation": "conversation",
+            "unknown": "unknown",
+        }
+
+        legacy_route_by_route = {
+            "memory_query": "reflection",
+            "world_query": "world_model",
+            "reasoning": "reasoning",
+            "learning": "world_model",
+            "agency": "agency",
+            "error_query": "error_awareness",
+        }
+
+        if operation == "approval":
+            intention_type = "approval"
+        elif operation == "rejection":
+            intention_type = "rejection"
+        else:
+            intention_type = intention_type_by_route.get(route, "unknown")
+
+        return {
+            "intention_type": intention_type,
+            "route": route,
+            "legacy_route": legacy_route_by_route.get(route, "conversation"),
+            "goal": route_result.get("summary", ""),
+            "summary": route_result.get("summary", ""),
+            "requires_action": route == "agency",
+            "requires_approval": True,
+            "needs_clarification": bool(route_result.get("needs_clarification", False)),
+            "confidence": route_result.get("confidence", 0.0),
+            "rationale": f"Conversation Router classified the message as {route}.",
+            "approval_target": "",
+            "structured_request": structured_request,
+            "candidate_tools": [],
+            "operation": operation,
+            "source": route_result.get("source", "conversation_router"),
+            "raw_user_input": user_input,
+        }
+
+    def _delegate_conversation_route(self, intention_id, intention, user_input):
+        route = intention.get("route")
+
+        if route in {"greeting", "small_talk", "conversation"}:
+            return self.conversation_engine.respond(user_input, intention, self.conversation_context)
+
+        if route == "identity":
+            return self.identity_engine.respond(user_input)
+
+        if route == "capability":
+            return self.capability_engine.respond()
+
+        if route == "self_status":
+            return self.self_status_engine.respond()
+
+        if route == "error_query":
+            return self._handle_error_awareness_route(intention)
+
+        if route == "memory_query":
+            return self.reflection_engine.respond(user_input)
+
+        if route == "world_query":
+            response = self.world_model.answer(user_input)
+            return response or self._natural_response(user_input, intention)
+
+        if route == "reasoning":
+            return self.reasoning_engine.respond(user_input)
+
+        if route == "learning":
+            self.memory.save_memory("conversation", user_input)
+            self.memory_manager.observe(user_input)
+            self.memory_manager.maintenance()
+            return self._handle_world_route(intention, user_input)
+
+        if route == "agency":
+            return self._handle_agency_route(intention_id, intention)
+
+        if route == "system":
+            return self._handle_system_route(intention)
 
         if intention.get("needs_clarification") or intention.get("confidence", 0.0) < 0.50:
-            return self._speak("Não consegui interpretar isso com segurança. Pode me explicar melhor?")
+            return "Não entendi com segurança o que você quer agora. Pode me explicar de outro jeito?"
 
-        response = self._delegate(intention_id, intention, user_input)
-        if response:
-            return self._speak(response)
+        return self._delegate(intention_id, intention, user_input)
 
-        fallback = self._natural_response(user_input, intention)
-        return self._speak(fallback)
+    def _handle_system_route(self, intention):
+        request = self._structured_request(intention)
+        subsystem = request.get("subsystem")
+        operation = request.get("operation") or intention.get("operation")
+
+        if subsystem == "voice" or operation == "voice_status":
+            try:
+                status = self.voice_engine.status()
+                return (
+                    f"Voz: {status.get('status')}.\n"
+                    f"Provider atual: {status.get('provider')}.\n"
+                    f"Último erro: {status.get('last_error') or 'nenhum'}."
+                )
+            except Exception as error:
+                return self.handle_exception(error, {"module": "voice/voice_engine.py", "operation": "status"})
+
+        if subsystem == "git" or operation in {"git_status", "git_branch", "branch", "history", "diff", "tracked_files", "read_only_policy"}:
+            git_request = {"operation": operation if operation in {"summary", "status", "branch", "history", "diff", "tracked_files", "read_only_policy"} else "summary"}
+            return self.git_awareness_engine.respond(git_request)
+
+        return self.self_status_engine.respond()
+
+    def _try_local_error_awareness(self, user_input):
+        """Minimal operational fallback for error diagnostics when the LLM is offline.
+
+        This is not a cognitive parser and does not create knowledge, intentions or
+        domain behavior. It only protects the desktop UX for the latest internal
+        error report.
+        """
+        last_error = self.error_capture.last_error()
+        if not last_error:
+            return None
+        normalized = (user_input or "").strip().lower()
+        diagnostic_markers = {"erro", "error", "falha", "corrigir", "correção", "grave", "gravidade", "aconteceu"}
+        if not any(marker in normalized for marker in diagnostic_markers):
+            return None
+        if any(marker in normalized for marker in {"corrigir", "correção", "onde"}):
+            return self.error_reporter.explain_last_error(last_error, focus="where")
+        if any(marker in normalized for marker in {"grave", "gravidade", "crítico", "critico"}):
+            return self.error_reporter.explain_last_error(last_error, focus="severity")
+        return self.error_reporter.explain_last_error(last_error)
 
     def _delegate(self, intention_id, intention, user_input):
         route = intention.get("route")
 
         if route == "knowledge_sources":
             return self._handle_knowledge_source_route(intention, user_input)
+
+        if route == "error_awareness":
+            return self._handle_error_awareness_route(intention)
 
         if route == "self_code_awareness":
             return self._handle_self_code_route(intention)
@@ -168,6 +359,9 @@ class Athena:
         if intention.get("intention_type") == "knowledge_input":
             return self._handle_world_route(intention, user_input)
 
+        if intention.get("intention_type") == "error_awareness_request":
+            return self._handle_error_awareness_route(intention)
+
         if intention.get("intention_type") == "self_code_request":
             return self._handle_self_code_route(intention)
 
@@ -185,6 +379,16 @@ class Athena:
 
         return None
 
+
+    def _handle_error_awareness_route(self, intention):
+        request = self._structured_request(intention)
+        focus = request.get("focus") or intention.get("operation")
+        last_error = self.error_capture.last_error()
+        if focus in {"where", "module", "correction_location"}:
+            return self.error_reporter.explain_last_error(last_error, focus="where")
+        if focus in {"severity", "gravity", "risk"}:
+            return self.error_reporter.explain_last_error(last_error, focus="severity")
+        return self.error_reporter.explain_last_error(last_error)
 
     def _handle_self_code_route(self, intention):
         request = self._structured_request(intention)
@@ -311,7 +515,8 @@ class Athena:
 
     def _natural_response(self, user_input, intention):
         if self.llm_provider:
-            prompt = f"""
+            try:
+                prompt = f"""
 Você é Athena respondendo de forma natural, curta e fiel ao Athena Core.
 Não invente fatos. Se faltar contexto, peça esclarecimento.
 
@@ -324,21 +529,46 @@ Intenção estruturada:
 Mensagem do usuário:
 {user_input}
 """.strip()
-            result = self.llm_provider.generate(prompt)
-            if result.available and result.text:
-                return result.text.strip()
+                result = self.llm_provider.generate(prompt)
+                if result.available and result.text:
+                    return result.text.strip()
+            except Exception as error:
+                self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "natural_response"})
         return "Minha LLM local não está disponível agora, mas continuo funcional com minha memória interna. Pode me dar mais contexto?"
 
 
     def get_desktop_status(self):
-        llm_health = self.llm_provider.health_check()
-        voice_status = self.voice_engine.status()
-        git_summary = self.git_awareness_engine.summary()
+        try:
+            llm_health = self.llm_provider.health_check()
+        except Exception as error:
+            self.handle_exception(error, {"module": "llm/provider.py", "operation": "health_check"})
+            llm_health = {"available": False, "status": "erro", "error": str(error)}
+
+        try:
+            voice_status = self.voice_engine.status()
+        except Exception as error:
+            self.handle_exception(error, {"module": "voice/voice_engine.py", "operation": "status"})
+            voice_status = {"enabled": False, "status": "erro", "provider": "indisponível", "last_error": str(error)}
+
+        try:
+            git_summary = self.git_awareness_engine.summary()
+        except Exception as error:
+            self.handle_exception(error, {"module": "git_awareness", "operation": "summary"})
+            git_summary = {"git_available": False, "is_git_repository": False, "error": str(error)}
+
         git_text = "indisponível"
         if git_summary.get("git_available") and git_summary.get("is_git_repository"):
             git_text = f"repo local / branch {git_summary.get('current_branch')}"
         elif git_summary.get("git_available"):
             git_text = "git disponível, sem repo local"
+
+        def safe_count(fn, fallback=0):
+            try:
+                return fn()
+            except Exception as error:
+                self.handle_exception(error, {"module": "memory/database.py", "operation": "status_count"})
+                return fallback
+
         return {
             "llm": {
                 "status": llm_health.get("status"),
@@ -347,27 +577,32 @@ Mensagem do usuário:
             },
             "voice": voice_status,
             "memory": {
-                "memories": self.memory.count_memories(),
-                "short_term": self.memory.count_short_term_memory(),
-                "mid_term": self.memory.count_mid_term_memory(),
-                "long_term": self.memory.count_real_long_term_memory(),
+                "memories": safe_count(self.memory.count_memories),
+                "short_term": safe_count(self.memory.count_short_term_memory),
+                "mid_term": safe_count(self.memory.count_mid_term_memory),
+                "long_term": safe_count(self.memory.count_real_long_term_memory),
             },
             "world": {
-                "entities": self.memory.count_entities(),
-                "relationships": self.memory.count_world_relationships(),
-                "events": self.memory.count_world_events(),
-                "states": self.memory.count_entity_states(),
+                "entities": safe_count(self.memory.count_entities),
+                "relationships": safe_count(self.memory.count_world_relationships),
+                "events": safe_count(self.memory.count_world_events),
+                "states": safe_count(self.memory.count_entity_states),
             },
             "agency": {
-                "intentions": len(self.memory.list_intentions(limit=100000)),
-                "plans": len(self.memory.list_plans(limit=100000)),
-                "actions": len(self.memory.list_actions(limit=100000)),
+                "intentions": safe_count(lambda: len(self.memory.list_intentions(limit=100000))),
+                "plans": safe_count(lambda: len(self.memory.list_plans(limit=100000))),
+                "actions": safe_count(lambda: len(self.memory.list_actions(limit=100000))),
             },
             "git": {
                 "summary": git_text,
                 "details": git_summary,
             },
+            "last_error": self.error_capture.last_error(),
         }
+
+    def handle_exception(self, error, context=None):
+        captured = self.error_capture.capture(error, context or {})
+        return self.error_reporter.friendly_message(captured)
 
     def _format_world_saved(self, saved):
         parts = []
@@ -391,6 +626,14 @@ Mensagem do usuário:
             f"World Model: {saved.get('world', {})}"
         )
 
+    def _finalize_response(self, response, route_result=None):
+        route = (route_result or {}).get("route", "")
+        self.conversation_context.add_athena_message(response, route=route)
+        return self._speak(response)
+
     def _speak(self, response):
-        self.voice_engine.speak(response)
+        try:
+            self.voice_engine.speak(response)
+        except Exception as error:
+            self.handle_exception(error, {"module": "voice/voice_engine.py", "operation": "speak"})
         return response

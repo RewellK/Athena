@@ -27,5 +27,12 @@
     "projectRoot": ".",
     "gitReadOnly": true,
     "selfCodeAwarenessEnabled": true,
-    "gitAwarenessEnabled": true
+    "gitAwarenessEnabled": true,
+    "enableAgency": true,
+    "enableProactivity": true,
+    "sqliteBusyTimeoutSeconds": 30,
+    "guiBlockConcurrentMessages": true,
+    "errorAwarenessEnabled": true,
+    "conversationFirst": true,
+    "knowledgeExtractionEntryPoint": "learning_route_only"
 }

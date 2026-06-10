@@ -21,6 +21,7 @@ class IntentionEngine:
         "knowledge_source_request",
         "self_code_request",
         "git_awareness_request",
+        "error_awareness_request",
         "agency_request",
         "approval",
         "rejection",
@@ -37,6 +38,7 @@ class IntentionEngine:
         "knowledge_sources",
         "self_code_awareness",
         "git_awareness",
+        "error_awareness",
         "agency",
         "conversation",
         "none",
@@ -84,18 +86,20 @@ Se a intenção for ambígua, reduza confidence e defina needs_clarification=tru
 
 Tipos permitidos:
 conversation, knowledge_input, question, reflection_request, self_model_request,
-reasoning_request, curiosity_request, knowledge_source_request, self_code_request, git_awareness_request, agency_request,
+reasoning_request, curiosity_request, knowledge_source_request, self_code_request, git_awareness_request, error_awareness_request, agency_request,
 approval, rejection, correction, unknown
 
 Rotas permitidas:
 world_model, reasoning, reflection, self_model, curiosity, knowledge_sources,
-self_code_awareness, git_awareness, agency, conversation, none
+self_code_awareness, git_awareness, error_awareness, agency, conversation, none
 
 
 Para self_code_awareness, use structured_request.operation como uma operação genérica entre:
 body, modules, capabilities, limitations, weakest_area, version_changes, snapshot.
 Para git_awareness, use structured_request.operation como uma operação genérica entre:
 summary, status, branch, history, diff, tracked_files, read_only_policy, ou uma operação solicitada se for mutação.
+Para error_awareness, use structured_request.focus como uma operação genérica entre:
+last_error, where, severity, impact, suggestion.
 
 Schema obrigatório:
 {{
