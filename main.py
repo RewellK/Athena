@@ -4,10 +4,10 @@ from brain.orchestrator import Athena
 def main():
     athena = Athena()
 
-    print("Athena V12.3 — Natural Conversation, Performance & GUI Polish")
+    print("Athena V12.4 — LLM-Guided Intent & Target Resolution")
     print("Digite 'sair' para encerrar.")
     print("Bootstrap automático ativo.")
-    print("Conversation-first ativo com respostas naturais, métricas e caminho rápido.")
+    print("Intent resolution LLM-first ativo. Core decide; LLM interpreta linguagem.")
 
     while True:
         user_input = input("\nVocê: ")

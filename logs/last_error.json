@@ -1,0 +1,21 @@
+{
+    "timestamp": "2026-06-10T18:39:14",
+    "error_type": "DatabaseError",
+    "error": "database disk image is malformed",
+    "context": {
+        "module": "gui/agency_panel.py",
+        "operation": "refresh"
+    },
+    "analysis": {
+        "title": "Falha interna inesperada",
+        "severity": "médio",
+        "probable_module": "gui/agency_panel.py",
+        "impact": "A operação atual pode não ter sido concluída, mas a Athena deve continuar funcionando.",
+        "friendly_explanation": "Encontrei uma falha interna durante o processamento.",
+        "suggestions": [
+            "Verificar logs/errors.log para o stacktrace técnico.",
+            "Repetir a operação após atualizar o estado da GUI."
+        ]
+    },
+    "stacktrace": "Traceback (most recent call last):\n  File \"/Users/rewell/Documents/GitHub/Athena/gui/agency_panel.py\", line 21, in refresh\n    f\"Intenções: {len(memory.list_intentions(limit=100000))}\",\n                      ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^\n  File \"/Users/rewell/Documents/GitHub/Athena/memory/database.py\", line 1390, in list_intentions\n    cursor.execute(query, params)\n    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^\n  File \"/Users/rewell/Documents/GitHub/Athena/memory/database.py\", line 18, in execute\n    self._cursor.execute(*args, **kwargs)\n    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\nsqlite3.DatabaseError: database disk image is malformed\n"
+}
