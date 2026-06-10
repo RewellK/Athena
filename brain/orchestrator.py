@@ -31,6 +31,9 @@ from llm.provider import OllamaProvider
 from memory.database import MemoryDB
 from memory_interpreter import MemoryInterpreter
 from memory_manager.memory_manager import MemoryManager
+from relevance.consolidation_planner import ConsolidationPlanner
+from relevance.follow_up_question_engine import FollowUpQuestionEngine
+from relevance.relevance_engine import RelevanceEngine
 from reasoning.reasoning_engine import ReasoningEngine
 from reflection.reflection_engine import ReflectionEngine
 from self_model.self_model import SelfModel
@@ -78,6 +81,9 @@ class Athena:
         self.intention_engine = IntentionEngine(self.llm_provider, self.context_builder, self.logger)
         self.memory_interpreter = MemoryInterpreter(self.llm_provider, self.context_builder, self.logger)
         self.memory_manager = MemoryManager(self.memory, self.memory_interpreter, self.creator_name)
+        self.relevance_engine = RelevanceEngine(self.llm_provider, self.identity, self.logger, self.settings)
+        self.follow_up_question_engine = FollowUpQuestionEngine(self.llm_provider, self.identity, self.logger, self.settings)
+        self.consolidation_planner = ConsolidationPlanner()
         self.learning_engine = LearningEngine(self.memory, self.creator_name)
         self.world_model = WorldModel(
             self.memory,
@@ -128,7 +134,15 @@ class Athena:
             error_capture=self.error_capture,
         )
         self.conversation_context = ConversationContext()
-        self.conversation_router = ConversationRouter(self.llm_provider, self.context_builder, self.logger, identity=self.identity, settings=self.settings)
+        self.conversation_router = ConversationRouter(
+            self.llm_provider,
+            self.context_builder,
+            self.logger,
+            identity=self.identity,
+            settings=self.settings,
+            tool_registry=self.tool_registry,
+            relevance_engine=self.relevance_engine,
+        )
         self.conversation_engine = ConversationEngine(
             identity=self.identity,
             llm_provider=self.llm_provider,
@@ -176,6 +190,7 @@ class Athena:
             status="observed",
         )
 
+        relevance = route_result.get("relevance") if isinstance(route_result.get("relevance"), dict) else {}
         metadata = {
             "route": intention.get("route"),
             "intent": intention.get("intent"),
@@ -187,6 +202,17 @@ class Athena:
             "used_voice": False,
             "used_sound": self.settings.get("messageReceivedSoundEnabled", True),
             "intent_interpretation_ms": route_result.get("intent_interpretation_ms", 0),
+            "relevance_score": relevance.get("relevance_score", 0),
+            "emotional_score": relevance.get("emotional_score", 0),
+            "relationship_score": relevance.get("relationship_score", 0),
+            "identity_score": relevance.get("identity_score", 0),
+            "future_score": relevance.get("future_score", 0),
+            "memory_priority": relevance.get("memory_priority", "ignore"),
+            "saved_to_memory": False,
+            "updated_world_model": False,
+            "follow_up_generated": False,
+            "required_tool": route_result.get("tool_name") if route_result.get("requires_tool") else None,
+            "tool_available": False,
         }
 
         pending_response = self._handle_pending(intention, user_input)
@@ -223,6 +249,7 @@ class Athena:
             "learning": "knowledge_input",
             "agency": "agency_request",
             "system": "question",
+            "external_information": "tool_information_request",
             "error_query": "error_awareness_request",
             "unknown": "unknown",
         }
@@ -234,6 +261,7 @@ class Athena:
             "reasoning": "reasoning",
             "learning": "world_model",
             "agency": "agency",
+            "external_information": "external_information",
             "error_query": "error_awareness",
         }
 
@@ -249,6 +277,10 @@ class Athena:
             "route": route,
             "intent": intent,
             "target": route_result.get("target", ""),
+            "target_type": route_result.get("target_type", "unknown"),
+            "requires_tool": route_result.get("requires_tool", False),
+            "tool_name": route_result.get("tool_name"),
+            "requires_memory": route_result.get("requires_memory", False),
             "legacy_route": legacy_route_by_route.get(route, "conversation"),
             "goal": route_result.get("summary", ""),
             "summary": route_result.get("summary", ""),
@@ -261,6 +293,8 @@ class Athena:
             "structured_request": structured_request,
             "candidate_tools": [],
             "operation": operation,
+            "relevance": route_result.get("relevance", {}),
+            "original_route": route_result.get("original_route", route),
             "source": route_result.get("source", "conversation_router"),
             "raw_user_input": user_input,
             "should_use_llm_response": route_result.get("should_use_llm_response", False),
@@ -279,7 +313,7 @@ class Athena:
 
         if route == "identity":
             operation = intention.get("operation") or self._structured_request(intention).get("operation")
-            return self.identity_engine.respond(user_input, operation=operation, target=intention.get("target"))
+            return self.identity_engine.respond(user_input, operation=operation, target=intention.get("target"), intent=intention.get("intent"))
 
         if route == "question_about_user":
             return self._handle_question_about_user(intention, user_input, metadata)
@@ -302,23 +336,23 @@ class Athena:
 
         if route == "world_query":
             metadata["used_world_model"] = True
-            response = self.world_model.answer(user_input)
+            response = self._handle_world_query(intention, user_input)
             return response or self._natural_response(user_input, intention)
 
         if route == "reasoning":
             metadata["used_reasoning"] = True
-            return self.reasoning_engine.respond(user_input)
+            return self.reasoning_engine.respond(user_input, intention)
 
         if route == "learning":
             metadata["used_world_model"] = True
-            self.memory.save_memory("conversation", user_input)
-            self.memory_manager.observe(user_input)
-            self.memory_manager.maintenance()
-            return self._handle_world_route(intention, user_input)
+            return self._handle_learning_route(intention, user_input, metadata)
 
         if route == "agency":
             metadata["used_agency"] = True
             return self._handle_agency_route(intention_id, intention)
+
+        if route == "external_information":
+            return self._handle_external_information_route(intention, metadata)
 
         if route == "system":
             return self._handle_system_route(intention)
@@ -341,18 +375,152 @@ class Athena:
             return response
 
         if target:
-            rows = self.memory.find_entities(name_fragment=target)
-            if rows:
-                lines = [f"Encontrei {rows[0][1]} no meu World Model como {rows[0][2]}."]
-                relationships = self.memory.find_world_relationships(source=rows[0][1]) + self.memory.find_world_relationships(target=rows[0][1])
-                if relationships:
-                    lines.append("Relações conhecidas:")
-                    for _id, source, relation, related_target, confidence, _created_at in relationships[:6]:
-                        lines.append(f"- {source} -> {relation} -> {related_target} | confiança={confidence}")
-                return "\n".join(lines)
+            entity_answer = self._describe_entity_from_memory(
+                target,
+                technical=self._wants_technical_output(intention),
+                user_input=user_input,
+            )
+            if entity_answer:
+                return entity_answer
             return f"Ainda não tenho informações suficientes sobre {target}."
 
         return "Ainda não tenho informações suficientes sobre essa pessoa ou entidade."
+
+
+    def _handle_world_query(self, intention, user_input):
+        target = str(intention.get("target") or "").strip()
+        if target:
+            entity_answer = self._describe_entity_from_memory(
+                target,
+                technical=self._wants_technical_output(intention),
+                user_input=user_input,
+            )
+            if entity_answer:
+                return entity_answer
+        response = self.world_model.answer(user_input)
+        if response:
+            return response
+        if target:
+            return f"Ainda não tenho informações suficientes sobre {target}."
+        return None
+
+    def _describe_entity_from_memory(self, target, technical=False, user_input=""):
+        rows = self.memory.find_entities(name_fragment=target, limit=10)
+        exact = None
+        for row in rows:
+            if str(row[1]).strip().lower() == target.strip().lower():
+                exact = row
+                break
+        if exact is None and len(rows) == 1:
+            exact = rows[0]
+        if exact is None:
+            return None
+
+        _entity_id, name, entity_type, _created_at = exact
+        relationships = self.memory.find_world_relationships(source=name) + self.memory.find_world_relationships(target=name)
+        states = self.memory.list_entity_states(entity_name=name)
+        events = self.memory.find_world_events(entity_name=name)
+
+        if not technical:
+            return self._format_entity_natural(user_input, name, entity_type, relationships, states, events)
+
+        return self._format_entity_technical(name, entity_type, relationships, states, events)
+
+    def _format_entity_technical(self, name, entity_type, relationships, states, events):
+        lines = [f"{name} está registrado no meu World Model como {entity_type}."]
+        if relationships:
+            lines.append("O que sei estruturalmente:")
+            for _id, source, relation, related_target, confidence, _created_at in relationships[:8]:
+                lines.append(f"- {source} -> {relation} -> {related_target} | confiança={confidence}")
+        if states:
+            lines.append("Estados conhecidos:")
+            for _id, entity, attribute, value, source_event, confidence, _created_at, updated_at in states[:8]:
+                lines.append(f"- {entity}.{attribute} = {value} | confiança={confidence}")
+        if events:
+            lines.append("Eventos relacionados:")
+            for _id, event_name, event_type, date, description, created_at in events[:6]:
+                when = f" em {date}" if date else ""
+                lines.append(f"- {event_name} [{event_type}]{when}")
+        return "\n".join(lines)
+
+    def _format_entity_natural(self, user_input, name, entity_type, relationships, states, events):
+        facts = {
+            "entity": {"name": name, "type": entity_type},
+            "relationships": [
+                {"source": source, "relation": relation, "target": target, "confidence": confidence}
+                for _id, source, relation, target, confidence, _created_at in relationships[:12]
+            ],
+            "states": [
+                {"entity": entity, "attribute": attribute, "value": value, "confidence": confidence}
+                for _id, entity, attribute, value, _source_event, confidence, _created_at, _updated_at in states[:12]
+            ],
+            "events": [
+                {"name": event_name, "type": event_type, "date": date, "description": description}
+                for _id, event_name, event_type, date, description, _created_at in events[:8]
+            ],
+        }
+        if self.llm_provider and self.settings.get("useNaturalResponses", True):
+            try:
+                prompt = f"""
+Você é o NaturalResponseEngine da Athena.
+Responda naturalmente a consulta sobre uma entidade usando somente os fatos estruturados.
+Não mostre tabela técnica, setas ou confiança por padrão.
+Não invente fatos.
+Se os fatos forem poucos, diga isso com honestidade.
+Responda em português brasileiro, de forma breve.
+
+Pergunta:
+{user_input}
+
+Fatos estruturados:
+{json.dumps(facts, ensure_ascii=False, indent=2)}
+""".strip()
+                result = self.llm_provider.generate(prompt)
+                if result.available and result.text:
+                    return result.text.strip()
+            except Exception as error:
+                self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "format_entity_natural"})
+
+        lines = [f"Pelo que sei, {name} está registrado como {entity_type}."]
+        if relationships:
+            relation_text = ", ".join(f"{source} {relation.replace('_', ' ')} {target}" for _id, source, relation, target, _confidence, _created_at in relationships[:4])
+            lines.append(f"Também sei que: {relation_text}.")
+        if states:
+            state_text = ", ".join(f"{entity} tem {attribute.replace('_', ' ')} {value}" for _id, entity, attribute, value, _source_event, _confidence, _created_at, _updated_at in states[:4])
+            lines.append(f"Estados registrados: {state_text}.")
+        return " ".join(lines)
+
+
+    def _handle_external_information_route(self, intention, metadata=None):
+        metadata = metadata if isinstance(metadata, dict) else {}
+        requested_tool = str(intention.get("tool_name") or intention.get("target") or "fonte externa").strip() or "fonte externa"
+        metadata["required_tool"] = requested_tool
+        available = []
+        try:
+            available = self.tool_registry.list_available()
+        except Exception as error:
+            self.handle_exception(error, {"module": "agency/tool_registry.py", "operation": "list_available"})
+        matching = self._find_matching_tool(requested_tool, available)
+        metadata["tool_available"] = bool(matching)
+        if matching:
+            return (
+                f"Eu reconheço uma capacidade relacionada a '{requested_tool}', mas ainda não tenho um executor externo configurado para consultar essa fonte em tempo real.\n"
+                "Posso registrar isso como uma lacuna de ferramenta para uma versão futura, se você autorizar."
+            )
+        return (
+            f"Ainda não possuo uma ferramenta/fonte configurada para consultar '{requested_tool}' em tempo real.\n"
+            "Para evitar inventar informação externa, prefiro não responder como se eu tivesse acessado essa fonte."
+        )
+
+    def _find_matching_tool(self, requested_tool, available_tools):
+        requested = str(requested_tool or "").strip().lower()
+        if not requested:
+            return None
+        for tool in available_tools or []:
+            text = f"{tool.get('id', '')} {tool.get('capability', '')}".lower()
+            if requested in text:
+                return tool
+        return None
 
     def _handle_system_route(self, intention):
         request = self._structured_request(intention)
@@ -399,6 +567,9 @@ class Athena:
     def _delegate(self, intention_id, intention, user_input):
         route = intention.get("route")
 
+        if route == "external_information":
+            return self._handle_external_information_route(intention)
+
         if route == "knowledge_sources":
             return self._handle_knowledge_source_route(intention, user_input)
 
@@ -415,7 +586,7 @@ class Athena:
             return self._handle_world_route(intention, user_input)
 
         if route == "reasoning":
-            return self.reasoning_engine.respond(user_input)
+            return self.reasoning_engine.respond(user_input, intention)
 
         if route == "reflection":
             return self.reflection_engine.respond(user_input)
@@ -430,7 +601,7 @@ class Athena:
             return self._handle_agency_route(intention_id, intention)
 
         if intention.get("intention_type") == "knowledge_input":
-            return self._handle_world_route(intention, user_input)
+            return self._handle_learning_route(intention, user_input, {})
 
         if intention.get("intention_type") == "error_awareness_request":
             return self._handle_error_awareness_route(intention)
@@ -448,7 +619,7 @@ class Athena:
             return self.self_model.respond(user_input)
 
         if intention.get("intention_type") == "reasoning_request":
-            return self.reasoning_engine.respond(user_input)
+            return self.reasoning_engine.respond(user_input, intention)
 
         return None
 
@@ -477,6 +648,236 @@ class Athena:
             request = dict(request)
             request["operation"] = intention.get("operation")
         return request
+
+    def _handle_learning_route(self, intention, user_input, metadata=None):
+        metadata = metadata if isinstance(metadata, dict) else {}
+        supplemental_context = self._learning_supplemental_context(intention, user_input)
+        extraction, decision = self.world_model.propose(user_input, supplemental_context=supplemental_context)
+
+        route_relevance = intention.get("relevance") if isinstance(intention.get("relevance"), dict) else {}
+        relevance = self.relevance_engine.evaluate(
+            user_message=user_input,
+            resolved_intent=intention,
+            resolved_target={"target": intention.get("target"), "target_type": intention.get("target_type")},
+            recent_context=self.conversation_context.summary(limit=8),
+            extracted_knowledge=extraction,
+            known_entities=self._known_entity_context(),
+            current_user_identity={"name": self.creator_name},
+            self_identity=self.identity,
+        )
+        relevance = self._merge_relevance(route_relevance, relevance)
+
+        plan = self.consolidation_planner.plan(
+            resolved_intent=intention,
+            resolved_target={"target": intention.get("target"), "target_type": intention.get("target_type")},
+            extracted_knowledge=extraction,
+            relevance=relevance,
+            current_memory_state=self._memory_state_snapshot(),
+            current_world_model_state=self._world_state_snapshot(),
+        )
+
+        follow_up = self.follow_up_question_engine.generate(
+            user_input,
+            relevance,
+            extracted_knowledge=extraction,
+            resolved_target={"target": intention.get("target"), "target_type": intention.get("target_type")},
+            recent_context=self.conversation_context.summary(limit=8),
+        )
+        if follow_up:
+            relevance["should_ask_follow_up"] = True
+            relevance["follow_up_question"] = follow_up
+            plan["ask_follow_up"] = True
+            plan["follow_up_question"] = follow_up
+
+        memory_result = self.memory_manager.observe(
+            user_input,
+            relevance=relevance,
+            consolidation_plan=plan,
+            follow_up_question=follow_up,
+        )
+        self.memory_manager.maintenance()
+        metadata["saved_to_memory"] = bool(memory_result.get("saved_layers"))
+        metadata["follow_up_generated"] = bool(follow_up)
+        self._apply_relevance_metadata(metadata, relevance)
+
+        saved = {"entities": 0, "relationships": 0, "events": 0, "states": 0, "decision": decision, "extraction": extraction}
+        decision_name = decision.get("decision")
+        if plan.get("update_world_model") and decision_name == "save":
+            saved = self.world_model.apply_extraction(extraction)
+            saved["decision"] = decision
+            saved["extraction"] = extraction
+            self.memory.save_world_extraction(user_input, extraction, saved)
+            metadata["updated_world_model"] = any(saved.get(key, 0) for key in ("entities", "relationships", "events", "states"))
+        elif plan.get("update_world_model") and decision_name == "confirm":
+            self.pending_world_extraction = {"text": user_input, "extraction": extraction, "decision": decision}
+            self.memory.save_world_extraction(user_input, extraction, {"decision": decision, "saved": False})
+        elif self._has_extracted_knowledge(extraction):
+            self.memory.save_world_extraction(user_input, extraction, {"decision": decision, "saved": False})
+
+        return self._format_learning_natural(user_input, intention, extraction, decision, saved, relevance, plan, follow_up)
+
+    def _apply_relevance_metadata(self, metadata, relevance):
+        metadata["relevance_score"] = relevance.get("relevance_score", relevance.get("importance_score", 0))
+        metadata["emotional_score"] = relevance.get("emotional_score", 0)
+        metadata["relationship_score"] = relevance.get("relationship_score", 0)
+        metadata["identity_score"] = relevance.get("identity_score", 0)
+        metadata["future_score"] = relevance.get("future_score", 0)
+        metadata["memory_priority"] = relevance.get("memory_priority", "ignore")
+
+    def _merge_relevance(self, base, updated):
+        if not isinstance(base, dict) or not base:
+            return updated if isinstance(updated, dict) else {}
+        if not isinstance(updated, dict) or not updated:
+            return base
+        merged = dict(base)
+        merged.update(updated)
+        for key in ("relevance_score", "importance_score", "emotional_score", "relationship_score", "identity_score", "future_score"):
+            merged[key] = max(self._as_score(base.get(key, 0)), self._as_score(updated.get(key, 0)))
+        merged["memory_priority"] = self._stronger_priority(base.get("memory_priority"), updated.get("memory_priority"))
+        merged["should_ask_follow_up"] = bool(base.get("should_ask_follow_up") or updated.get("should_ask_follow_up"))
+        merged["follow_up_question"] = updated.get("follow_up_question") or base.get("follow_up_question") or ""
+        merged["related_entities"] = self._unique_texts((base.get("related_entities") or []) + (updated.get("related_entities") or []))
+        reasons = [item for item in [base.get("reason"), updated.get("reason")] if item]
+        merged["reason"] = " | ".join(reasons)
+        merged["confirmation_required"] = merged.get("memory_priority") == "long_confirm" or bool(base.get("confirmation_required") or updated.get("confirmation_required"))
+        return merged
+
+    def _stronger_priority(self, first, second):
+        order = {"ignore": 0, "short": 1, "mid": 2, "long_candidate": 3, "long_confirm": 4}
+        first = str(first or "ignore")
+        second = str(second or "ignore")
+        return first if order.get(first, 0) >= order.get(second, 0) else second
+
+    def _as_score(self, value):
+        try:
+            score = int(round(float(value)))
+        except (TypeError, ValueError):
+            score = 0
+        return max(0, min(100, score))
+
+    def _unique_texts(self, values):
+        seen = set()
+        unique = []
+        for value in values:
+            text = str(value or "").strip()
+            marker = text.lower()
+            if not text or marker in seen:
+                continue
+            seen.add(marker)
+            unique.append(text)
+        return unique
+
+    def _learning_supplemental_context(self, intention, user_input):
+        entities = self._known_entity_context()
+        relationships = [
+            {"source": source, "relation": relation, "target": target, "confidence": confidence}
+            for _id, source, relation, target, confidence, _created_at in self.memory.list_world_relationships()[:30]
+        ]
+        states = [
+            {"entity": entity, "attribute": attribute, "value": value, "confidence": confidence}
+            for _id, entity, attribute, value, _source_event, confidence, _created_at, _updated_at in self.memory.list_entity_states()[:20]
+        ]
+        context = {
+            "recent_conversation": self.conversation_context.summary(limit=8),
+            "resolved_target": {"target": intention.get("target"), "target_type": intention.get("target_type")},
+            "known_entities": entities,
+            "known_relationships": relationships,
+            "known_states": states,
+            "current_user": self.creator_name,
+            "self_identity": self.identity,
+        }
+        return json.dumps(context, ensure_ascii=False, indent=2)
+
+    def _known_entity_context(self):
+        return [
+            {"name": name, "type": entity_type}
+            for _id, name, entity_type, _created_at in self.memory.list_entities()[:40]
+        ]
+
+    def _memory_state_snapshot(self):
+        return {
+            "short_term": self.memory.count_short_term_memory(),
+            "mid_term": self.memory.count_mid_term_memory(),
+            "long_term": self.memory.count_real_long_term_memory(),
+        }
+
+    def _world_state_snapshot(self):
+        return {
+            "entities": self.memory.count_entities(),
+            "relationships": self.memory.count_world_relationships(),
+            "events": self.memory.count_world_events(),
+            "states": self.memory.count_entity_states(),
+        }
+
+    def _has_extracted_knowledge(self, extraction):
+        if not isinstance(extraction, dict):
+            return False
+        for key in ("entities", "relationships", "events", "states"):
+            if extraction.get(key):
+                return True
+        return False
+
+    def _format_learning_natural(self, user_input, intention, extraction, decision, saved, relevance, plan, follow_up):
+        payload = {
+            "intention": intention,
+            "extraction": extraction,
+            "decision": decision,
+            "saved": saved,
+            "relevance": relevance,
+            "consolidation_plan": plan,
+            "follow_up_question": follow_up,
+        }
+        if self.llm_provider and self.settings.get("useNaturalResponses", True):
+            try:
+                prompt = f"""
+Você é o NaturalResponseEngine da Athena.
+Escreva a resposta final ao usuário com base no resultado do Athena Core.
+Não despeje JSON, setas técnicas ou tabelas por padrão.
+Preserve os fatos importantes.
+Reconheça importância humana quando os scores indicarem isso.
+Se o conteúdo envolver relação com Athena, deixe claro que Athena não sente como um humano.
+Não invente sentimentos humanos.
+Se houver pergunta de follow-up, inclua no final de forma natural.
+Responda em português brasileiro, de forma breve e cuidadosa.
+
+Mensagem do usuário:
+{user_input}
+
+Resultado estruturado do Core:
+{json.dumps(payload, ensure_ascii=False, indent=2)}
+""".strip()
+                result = self.llm_provider.generate(prompt)
+                if result.available and result.text:
+                    return result.text.strip()
+            except Exception as error:
+                self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "format_learning_natural"})
+
+        score = self._as_score(relevance.get("relevance_score", relevance.get("importance_score", 0)))
+        if self._as_score(relevance.get("identity_score", 0)) >= 80:
+            base = "Entendi. Eu ainda não sinto como um humano, mas vou tratar essa informação como importante para minha memória e identidade."
+        elif score >= 75 or self._as_score(relevance.get("emotional_score", 0)) >= 70:
+            base = "Entendi. Isso parece importante para você, então vou guardar com cuidado."
+        else:
+            base = "Entendi. Registrei essa informação no contexto da nossa conversa."
+        if follow_up:
+            return f"{base} {follow_up}"
+        return base
+
+    def _wants_technical_output(self, intention):
+        request = self._structured_request(intention)
+        mode = str(request.get("mode") or "").strip().lower()
+        operation = str(request.get("operation") or "").strip().lower()
+        technical_operations = {
+            "technical",
+            "technical_detail",
+            "technical_details",
+            "debug",
+            "structured",
+            "structured_relations",
+            "world_model_relations",
+            "show_relations",
+        }
+        return mode == "technical" or operation in technical_operations
 
     def _handle_world_route(self, intention, user_input):
         response = self.world_model.answer(user_input)

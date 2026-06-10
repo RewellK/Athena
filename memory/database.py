@@ -299,6 +299,29 @@ class MemoryDB:
         """)
 
         self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS memory_relevance(
+            id INTEGER PRIMARY KEY,
+            layer TEXT NOT NULL,
+            layer_id INTEGER,
+            content TEXT NOT NULL,
+            source_message TEXT,
+            relevance_score INTEGER NOT NULL DEFAULT 0,
+            importance_score INTEGER NOT NULL DEFAULT 0,
+            emotional_score INTEGER NOT NULL DEFAULT 0,
+            relationship_score INTEGER NOT NULL DEFAULT 0,
+            identity_score INTEGER NOT NULL DEFAULT 0,
+            future_score INTEGER NOT NULL DEFAULT 0,
+            memory_priority TEXT NOT NULL DEFAULT 'ignore',
+            related_entities_json TEXT NOT NULL DEFAULT '[]',
+            confirmation_required INTEGER NOT NULL DEFAULT 0,
+            confirmed INTEGER NOT NULL DEFAULT 0,
+            follow_up_question TEXT,
+            reason TEXT,
+            created_at TEXT NOT NULL
+        )
+        """)
+
+        self.conn.execute("""
         CREATE TABLE IF NOT EXISTS world_extractions(
             id INTEGER PRIMARY KEY,
             input_text TEXT NOT NULL,
@@ -651,20 +674,25 @@ class MemoryDB:
     def save_short_term_memory(self, content, importance_score=0, hours_to_live=24):
         now = datetime.now()
         expires_at = now + timedelta(hours=hours_to_live)
+        clean_content = content.strip()
         self.conn.execute(
             """
             INSERT OR IGNORE INTO short_term_memory(content, content_hash, created_at, expires_at, importance_score, processed)
             VALUES (?, ?, ?, ?, ?, 0)
             """,
             (
-                content.strip(),
-                self._hash(content),
+                clean_content,
+                self._hash(clean_content),
                 now.isoformat(timespec="seconds"),
                 expires_at.isoformat(timespec="seconds"),
                 int(importance_score),
             )
         )
         self.conn.commit()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id FROM short_term_memory WHERE content_hash = ?", (self._hash(clean_content),))
+        row = cursor.fetchone()
+        return row[0] if row else None
 
     def list_short_term_memory(self, include_expired=False, processed=None, created_at_prefix=None):
         query = "SELECT id, content, content_hash, created_at, expires_at, importance_score, processed FROM short_term_memory WHERE 1=1"
@@ -698,13 +726,14 @@ class MemoryDB:
         now = datetime.now()
         expires_at = now + timedelta(days=days_to_live)
         topics_text = json.dumps(topics, ensure_ascii=False) if isinstance(topics, list) else str(topics)
+        clean_summary = summary.strip()
         self.conn.execute(
             """
             INSERT OR IGNORE INTO mid_term_memory(summary, topics, source_count, created_at, expires_at, importance_score, promoted)
             VALUES (?, ?, ?, ?, ?, ?, 0)
             """,
             (
-                summary.strip(),
+                clean_summary,
                 topics_text,
                 int(source_count),
                 now.isoformat(timespec="seconds"),
@@ -713,6 +742,10 @@ class MemoryDB:
             )
         )
         self.conn.commit()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id FROM mid_term_memory WHERE summary = ?", (clean_summary,))
+        row = cursor.fetchone()
+        return row[0] if row else None
 
     def list_mid_term_memory(self, include_expired=False, promoted=None):
         query = "SELECT id, summary, topics, source_count, created_at, expires_at, importance_score, promoted FROM mid_term_memory WHERE 1=1"
@@ -1008,14 +1041,19 @@ class MemoryDB:
         return cursor.fetchone()[0]
 
     def save_long_term_memory(self, content, source="manual", importance_score=80):
+        clean_content = content.strip()
         self.conn.execute(
             """
             INSERT OR IGNORE INTO long_term_memory(content, content_hash, source, importance_score, created_at)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (content.strip(), self._hash(content), source, int(importance_score), self._now())
+            (clean_content, self._hash(clean_content), source, int(importance_score), self._now())
         )
         self.conn.commit()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id FROM long_term_memory WHERE content_hash = ?", (self._hash(clean_content),))
+        row = cursor.fetchone()
+        return row[0] if row else None
 
     def list_long_term_memory(self):
         cursor = self.conn.cursor()
@@ -1026,6 +1064,102 @@ class MemoryDB:
         cursor = self.conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM long_term_memory")
         return cursor.fetchone()[0]
+
+    def save_memory_relevance(self, layer, layer_id, content, relevance, source_message=None, follow_up_question=None, confirmed=False):
+        relevance = relevance if isinstance(relevance, dict) else {}
+        related_entities = relevance.get("related_entities") if isinstance(relevance.get("related_entities"), list) else []
+        follow_up = follow_up_question if follow_up_question is not None else relevance.get("follow_up_question")
+        priority = str(relevance.get("memory_priority") or "ignore").strip() or "ignore"
+        self.conn.execute(
+            """
+            INSERT INTO memory_relevance(
+                layer, layer_id, content, source_message,
+                relevance_score, importance_score, emotional_score, relationship_score, identity_score, future_score,
+                memory_priority, related_entities_json, confirmation_required, confirmed, follow_up_question, reason, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(layer or "unknown").strip(),
+                layer_id,
+                str(content or "").strip(),
+                source_message,
+                self._score(relevance.get("relevance_score", relevance.get("importance_score", 0))),
+                self._score(relevance.get("importance_score", relevance.get("relevance_score", 0))),
+                self._score(relevance.get("emotional_score", 0)),
+                self._score(relevance.get("relationship_score", 0)),
+                self._score(relevance.get("identity_score", 0)),
+                self._score(relevance.get("future_score", 0)),
+                priority,
+                json.dumps(related_entities, ensure_ascii=False),
+                1 if relevance.get("confirmation_required", priority == "long_confirm") else 0,
+                1 if confirmed else 0,
+                str(follow_up or "").strip(),
+                str(relevance.get("reason") or "").strip(),
+                self._now(),
+            )
+        )
+        self.conn.commit()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT last_insert_rowid()")
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def list_memory_relevance(self, memory_priority=None, confirmation_required=None, limit=None):
+        query = """
+            SELECT id, layer, layer_id, content, source_message,
+                   relevance_score, importance_score, emotional_score, relationship_score, identity_score, future_score,
+                   memory_priority, related_entities_json, confirmation_required, confirmed, follow_up_question, reason, created_at
+            FROM memory_relevance
+            WHERE 1=1
+        """
+        params = []
+        if memory_priority:
+            if isinstance(memory_priority, (list, tuple, set)):
+                placeholders = ",".join("?" for _ in memory_priority)
+                query += f" AND memory_priority IN ({placeholders})"
+                params.extend(str(item) for item in memory_priority)
+            else:
+                query += " AND memory_priority = ?"
+                params.append(str(memory_priority))
+        if confirmation_required is not None:
+            query += " AND confirmation_required = ?"
+            params.append(1 if confirmation_required else 0)
+        query += " ORDER BY relevance_score DESC, created_at DESC"
+        if limit:
+            query += " LIMIT ?"
+            params.append(int(limit))
+        cursor = self.conn.cursor()
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    def list_long_term_memory_candidates(self, limit=None):
+        return self.list_memory_relevance(memory_priority=["long_candidate", "long_confirm"], limit=limit)
+
+    def list_pending_memory_confirmations(self, limit=None):
+        return self.list_memory_relevance(confirmation_required=True, limit=limit)
+
+    def list_follow_up_history(self, limit=None):
+        query = """
+            SELECT id, content, follow_up_question, relevance_score, memory_priority, created_at
+            FROM memory_relevance
+            WHERE follow_up_question IS NOT NULL AND follow_up_question != ''
+            ORDER BY created_at DESC
+        """
+        params = []
+        if limit:
+            query += " LIMIT ?"
+            params.append(int(limit))
+        cursor = self.conn.cursor()
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    def _score(self, value):
+        try:
+            number = int(round(float(value)))
+        except (TypeError, ValueError):
+            number = 0
+        return max(0, min(100, number))
 
     def save_world_extraction(self, input_text, proposed, saved):
         self.conn.execute(

@@ -78,7 +78,19 @@ class ChatPanel(ctk.CTkFrame):
         duration = metadata.get("duration_ms")
         route = metadata.get("route")
         if self.athena.settings.get("showRouteMetadata", False):
-            self._set_status(f"Resposta concluída em {duration}ms | rota: {route}")
+            relevance = metadata.get("relevance_score", 0)
+            emotional = metadata.get("emotional_score", 0)
+            priority = metadata.get("memory_priority", "ignore")
+            saved = metadata.get("saved_to_memory", False)
+            world = metadata.get("updated_world_model", False)
+            follow_up = metadata.get("follow_up_generated", False)
+            required_tool = metadata.get("required_tool") or "-"
+            tool_available = metadata.get("tool_available", False)
+            self._set_status(
+                f"{duration}ms | rota={route} | relevância={relevance} | emoção={emotional} | "
+                f"memória={priority} | salva={saved} | world={world} | follow-up={follow_up} | "
+                f"tool={required_tool}/{tool_available}"
+            )
         else:
             self._set_status(f"Resposta concluída em {duration}ms" if duration is not None else "Resposta concluída.")
         self._set_processing(False)
