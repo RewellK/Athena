@@ -46,5 +46,8 @@
     "voiceProfile": "default",
     "llmTimeoutSeconds": 30,
     "conversationMetricsEnabled": true,
-    "naturalResponseForSmallTalk": true
+    "naturalResponseForSmallTalk": true,
+    "useLLMIntentResolution": true,
+    "allowLocalIntentFallback": false,
+    "intentResolutionTimeoutSeconds": 8
 }

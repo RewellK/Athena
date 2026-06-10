@@ -52,6 +52,9 @@ DEFAULT_SETTINGS = {
     "llmTimeoutSeconds": 30,
     "conversationMetricsEnabled": True,
     "naturalResponseForSmallTalk": True,
+    "useLLMIntentResolution": True,
+    "allowLocalIntentFallback": False,
+    "intentResolutionTimeoutSeconds": 8,
 }
 
 
