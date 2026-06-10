@@ -1,76 +1,120 @@
-# Athena V12.2 — Conversational Maturity & Core Stabilization
+# Athena V12.3 — Natural Conversation, Performance & GUI Polish
 
-Athena V12.2 mantém o princípio central:
+Athena V12.3 mantém o princípio central:
 
 > Athena usa LLMs. LLMs não são Athena.
 
-Esta versão não adiciona uma nova capacidade cognitiva pesada. Ela corrige o fluxo central para que Athena converse antes de tentar aprender.
+A V12.2 fez Athena parar de quebrar. A V12.3 faz Athena conversar melhor, responder mais rápido em rotas simples e melhorar a experiência desktop.
 
 ## Mudança arquitetural principal
 
-Fluxo antigo problemático:
-
-```text
-Mensagem → Knowledge Extraction → possível erro / resposta ruim
-```
-
-Fluxo V12.2:
+Fluxo V12.3:
 
 ```text
 Mensagem
 ↓
-Conversation Router
+Intent Interpreter
 ↓
-Rota conversacional
+Response Planner
+↓
+Conversation Router
 ↓
 Módulo correto
 ↓
-Resposta
+Natural Response Engine
+↓
+Resposta + métricas
 ```
 
-Knowledge Extraction só é chamado quando a rota é `learning`.
+Knowledge Extraction continua restrita à rota `learning`.
 
-## Rotas conversacionais
+## Novos arquivos conversacionais
 
 ```text
 conversation/
-  conversation_router.py
-  conversation_context.py
-  conversation_engine.py
-  identity_engine.py
-  capability_engine.py
-  self_status_engine.py
+  intent_interpreter.py
+  response_planner.py
+  natural_response_engine.py
+  conversation_memory.py
+  conversation_metrics.py
 ```
 
-Rotas mínimas suportadas:
+## Rotas otimizadas
+
+Rotas simples usam caminho rápido quando seguro:
 
 - `greeting`
 - `small_talk`
 - `identity`
+- `creator_query`
+- `question_about_user`
 - `capability`
+- `technical_capability`
 - `self_status`
-- `memory_query`
-- `world_query`
-- `reasoning`
-- `learning`
-- `agency`
 - `system`
 - `error_query`
 
-## Health Engine
+Rotas pesadas continuam delegadas aos módulos próprios:
+
+- `learning`
+- `world_query`
+- `reasoning`
+- `agency`
+- `memory_query`
+
+## Som de recebimento
+
+Novo módulo:
 
 ```text
-health/
-  health_engine.py
-  health_snapshot.py
+audio/message_sound.py
 ```
 
-Permite responder perguntas como:
+Configuração:
 
-- Como você está?
-- Você está funcionando corretamente?
-- Você está usando Git?
-- Você consegue falar?
+```json
+{
+  "messageReceivedSoundEnabled": true,
+  "messageReceivedSoundProvider": "system_beep"
+}
+```
+
+O som é opcional e nunca quebra o núcleo.
+
+## GUI melhorada
+
+A Athena Desktop agora possui:
+
+- input limpo após envio
+- botão Enviar desativado enquanto processa
+- status “Athena está pensando...”
+- tempo de resposta exibido
+- scroll automático
+- checkbox para som
+- checkbox para voz
+- seleção básica de provider de voz
+- metadata de rota opcional em debug
+
+## Métricas
+
+As métricas são gravadas em:
+
+```text
+logs/conversation_metrics.jsonl
+```
+
+Cada interação registra:
+
+- input resumido
+- rota
+- intenção
+- duração em ms
+- uso de LLM
+- uso de World Model
+- uso de Reasoning
+- uso de Agency
+- uso de voz
+- uso de som
 
 ## Execução no terminal
 
@@ -94,75 +138,49 @@ python app.py
 
 Se `customtkinter` não estiver instalado, o núcleo continua funcionando pelo terminal.
 
-## Testes conversacionais sugeridos
+## Testes sugeridos
 
 ```text
 Olá Athena
-Tudo bem?
+Tudo bem com você?
 Quem é você?
-Como você está?
+Quem te criou?
+Quem é Rewell?
+Oi Athena, quem é você?
 O que você consegue fazer?
-Qual foi seu último erro?
+Me mostre tecnicamente seus módulos
+Meu pai se chama Francisco.
+Quem é Francisco?
 Você está usando Git?
 Você consegue falar?
 ```
 
 Resultado esperado:
 
-- nenhum crash
-- nenhuma tentativa de Knowledge Extraction
-- nenhuma mensagem “não consegui transformar isso em conhecimento estruturado”
-- respostas naturais ou operacionais
-
-## Testes de aprendizado sugeridos
-
-Com Ollama ativo:
-
-```text
-Meu pai se chama Francisco.
-Francisco comprou um Gol em 2023.
-Minha mãe se chama Débora.
-```
-
-Resultado esperado:
-
-- Conversation Router classifica como `learning`
-- Knowledge Extraction é acionado
-- JSON parcial ou ambíguo não derruba Athena
-- World Model é atualizado ou Athena pede confirmação/contexto
-
-## Resiliência
-
-A V12.2 endurece:
-
-- evento sem nome
-- evento sem tipo
-- relação incompleta
-- entidade sem nome
-- state vazio
-- confidence ausente
-- date ausente
-- JSON parcial
-- JSON inválido
-- lista vazia
-- Ollama offline
-- Git indisponível
-- último erro corrompido/ausente
+- saudações rápidas
+- small talk natural
+- identidade correta
+- pergunta sobre Rewell não vira identidade da Athena
+- capacidade resumida sem despejo técnico
+- capacidade técnica apenas quando solicitada
+- aprendizado só na rota `learning`
+- GUI responsiva
+- voz e som opcionais sem crash
 
 ## Auditoria
 
 Consulte:
 
 ```text
-AUDIT_V12_2.md
+AUDIT_V12_3.md
 ```
 
-## Filosofia da V12.2
+## Filosofia da V12.3
 
 Primeiro Athena conversa.
-Depois, quando necessário, ela aprende.
+Depois Athena aprende.
+Quando necessário, Athena raciocina.
+Quando autorizado, Athena age.
 
-A conversa não é memória permanente.
-Small talk não vira entidade.
-Pergunta simples não vira evento.
-Knowledge Extraction não é mais ponto de entrada.
+A naturalidade não pertence à GUI.
+A naturalidade pertence ao núcleo conversacional.

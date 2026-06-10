@@ -1,6 +1,8 @@
 import json
+import time
 
 from agency.action_engine import ActionEngine
+from audio.message_sound import MessageSoundEngine
 from agency.agency_engine import AgencyEngine
 from agency.goal_engine import GoalEngine
 from agency.intention_engine import IntentionEngine
@@ -14,6 +16,7 @@ from conversation.capability_engine import CapabilityEngine
 from conversation.conversation_context import ConversationContext
 from conversation.conversation_engine import ConversationEngine
 from conversation.conversation_router import ConversationRouter
+from conversation.conversation_metrics import ConversationMetrics
 from conversation.identity_engine import IdentityEngine
 from conversation.self_status_engine import SelfStatusEngine
 from curiosity.curiosity_engine import CuriosityEngine
@@ -113,6 +116,9 @@ class Athena:
         self.agency_engine = AgencyEngine(self.memory, self.goal_engine, self.action_engine, self.logger)
         self.forgetting_engine = ForgettingEngine(self.memory)
         self.voice_engine = VoiceEngine(self.settings, self.logger)
+        self.message_sound_engine = MessageSoundEngine(self.settings, self.logger)
+        self.conversation_metrics = ConversationMetrics(logger=self.logger)
+        self.last_response_metadata = {}
 
         self.health_engine = HealthEngine(
             memory=self.memory,
@@ -122,13 +128,14 @@ class Athena:
             error_capture=self.error_capture,
         )
         self.conversation_context = ConversationContext()
-        self.conversation_router = ConversationRouter(self.llm_provider, self.context_builder, self.logger)
+        self.conversation_router = ConversationRouter(self.llm_provider, self.context_builder, self.logger, identity=self.identity, settings=self.settings)
         self.conversation_engine = ConversationEngine(
             identity=self.identity,
             llm_provider=self.llm_provider,
             context_builder=self.context_builder,
             health_engine=self.health_engine,
             logger=self.logger,
+            settings=self.settings,
         )
         self.identity_engine = IdentityEngine(self.identity, self.self_model)
         self.capability_engine = CapabilityEngine(
@@ -150,6 +157,8 @@ class Athena:
             return self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "chat"})
 
     def _chat_impl(self, user_input):
+        started_at = self.conversation_metrics.start()
+        self.message_sound_engine.play_received()
         self.conversation_context.add_user_message(user_input)
 
         pending_state = self._pending_state()
@@ -167,28 +176,46 @@ class Athena:
             status="observed",
         )
 
+        metadata = {
+            "route": intention.get("route"),
+            "intent": intention.get("intent"),
+            "target": intention.get("target", ""),
+            "used_llm": route_result.get("source", "").startswith("llm"),
+            "used_world_model": False,
+            "used_reasoning": False,
+            "used_agency": False,
+            "used_voice": False,
+            "used_sound": self.settings.get("messageReceivedSoundEnabled", True),
+            "intent_interpretation_ms": route_result.get("intent_interpretation_ms", 0),
+        }
+
         pending_response = self._handle_pending(intention, user_input)
         if pending_response:
-            return self._finalize_response(pending_response, route_result)
+            return self._finalize_response(pending_response, route_result, started_at, user_input, metadata)
 
-        response = self._delegate_conversation_route(intention_id, intention, user_input)
+        response = self._delegate_conversation_route(intention_id, intention, user_input, metadata)
         if response:
-            return self._finalize_response(response, route_result)
+            return self._finalize_response(response, route_result, started_at, user_input, metadata)
 
         fallback = self.conversation_engine.respond(user_input, route_result, self.conversation_context)
-        return self._finalize_response(fallback, route_result)
+        return self._finalize_response(fallback, route_result, started_at, user_input, metadata)
 
     def _route_to_intention(self, route_result, user_input):
         route_result = route_result if isinstance(route_result, dict) else {}
         route = route_result.get("route", "unknown")
+        intent = route_result.get("intent") or route
         structured_request = route_result.get("structured_request") if isinstance(route_result.get("structured_request"), dict) else {}
-        operation = structured_request.get("operation") or route_result.get("intent") or route
+        operation = structured_request.get("operation") or intent or route
 
         intention_type_by_route = {
             "greeting": "conversation",
             "small_talk": "conversation",
+            "conversation": "conversation",
             "identity": "self_model_request",
+            "creator_query": "self_model_request",
+            "question_about_user": "question",
             "capability": "self_code_request",
+            "technical_capability": "self_code_request",
             "self_status": "self_model_request",
             "memory_query": "reflection_request",
             "world_query": "question",
@@ -197,13 +224,13 @@ class Athena:
             "agency": "agency_request",
             "system": "question",
             "error_query": "error_awareness_request",
-            "conversation": "conversation",
             "unknown": "unknown",
         }
 
         legacy_route_by_route = {
             "memory_query": "reflection",
             "world_query": "world_model",
+            "question_about_user": "world_model",
             "reasoning": "reasoning",
             "learning": "world_model",
             "agency": "agency",
@@ -220,6 +247,8 @@ class Athena:
         return {
             "intention_type": intention_type,
             "route": route,
+            "intent": intent,
+            "target": route_result.get("target", ""),
             "legacy_route": legacy_route_by_route.get(route, "conversation"),
             "goal": route_result.get("summary", ""),
             "summary": route_result.get("summary", ""),
@@ -234,19 +263,33 @@ class Athena:
             "operation": operation,
             "source": route_result.get("source", "conversation_router"),
             "raw_user_input": user_input,
+            "should_use_llm_response": route_result.get("should_use_llm_response", False),
+            "should_query_world_model": route_result.get("should_query_world_model", False),
+            "should_query_self_model": route_result.get("should_query_self_model", False),
+            "should_use_reasoning": route_result.get("should_use_reasoning", False),
+            "should_use_agency": route_result.get("should_use_agency", False),
         }
 
-    def _delegate_conversation_route(self, intention_id, intention, user_input):
+    def _delegate_conversation_route(self, intention_id, intention, user_input, metadata=None):
+        metadata = metadata if isinstance(metadata, dict) else {}
         route = intention.get("route")
 
         if route in {"greeting", "small_talk", "conversation"}:
             return self.conversation_engine.respond(user_input, intention, self.conversation_context)
 
         if route == "identity":
-            return self.identity_engine.respond(user_input)
+            operation = intention.get("operation") or self._structured_request(intention).get("operation")
+            return self.identity_engine.respond(user_input, operation=operation, target=intention.get("target"))
+
+        if route == "question_about_user":
+            return self._handle_question_about_user(intention, user_input, metadata)
 
         if route == "capability":
-            return self.capability_engine.respond()
+            technical = intention.get("intent") == "technical_capability" or self._structured_request(intention).get("operation") == "technical_modules"
+            return self.capability_engine.respond(technical=technical)
+
+        if route == "technical_capability":
+            return self.capability_engine.respond(technical=True)
 
         if route == "self_status":
             return self.self_status_engine.respond()
@@ -258,28 +301,58 @@ class Athena:
             return self.reflection_engine.respond(user_input)
 
         if route == "world_query":
+            metadata["used_world_model"] = True
             response = self.world_model.answer(user_input)
             return response or self._natural_response(user_input, intention)
 
         if route == "reasoning":
+            metadata["used_reasoning"] = True
             return self.reasoning_engine.respond(user_input)
 
         if route == "learning":
+            metadata["used_world_model"] = True
             self.memory.save_memory("conversation", user_input)
             self.memory_manager.observe(user_input)
             self.memory_manager.maintenance()
             return self._handle_world_route(intention, user_input)
 
         if route == "agency":
+            metadata["used_agency"] = True
             return self._handle_agency_route(intention_id, intention)
 
         if route == "system":
             return self._handle_system_route(intention)
 
-        if intention.get("needs_clarification") or intention.get("confidence", 0.0) < 0.50:
+        if intention.get("needs_clarification") or intention.get("confidence", 0.0) < 0.45:
             return "Não entendi com segurança o que você quer agora. Pode me explicar de outro jeito?"
 
         return self._delegate(intention_id, intention, user_input)
+
+    def _handle_question_about_user(self, intention, user_input, metadata=None):
+        target = str(intention.get("target") or "").strip()
+        creator = self.creator_name
+        if target and target.lower() == creator.lower():
+            return self.identity_engine.describe_creator()
+
+        metadata = metadata if isinstance(metadata, dict) else {}
+        metadata["used_world_model"] = True
+        response = self.world_model.answer(user_input)
+        if response:
+            return response
+
+        if target:
+            rows = self.memory.find_entities(name_fragment=target)
+            if rows:
+                lines = [f"Encontrei {rows[0][1]} no meu World Model como {rows[0][2]}."]
+                relationships = self.memory.find_world_relationships(source=rows[0][1]) + self.memory.find_world_relationships(target=rows[0][1])
+                if relationships:
+                    lines.append("Relações conhecidas:")
+                    for _id, source, relation, related_target, confidence, _created_at in relationships[:6]:
+                        lines.append(f"- {source} -> {relation} -> {related_target} | confiança={confidence}")
+                return "\n".join(lines)
+            return f"Ainda não tenho informações suficientes sobre {target}."
+
+        return "Ainda não tenho informações suficientes sobre essa pessoa ou entidade."
 
     def _handle_system_route(self, intention):
         request = self._structured_request(intention)
@@ -551,6 +624,12 @@ Mensagem do usuário:
             voice_status = {"enabled": False, "status": "erro", "provider": "indisponível", "last_error": str(error)}
 
         try:
+            sound_status = self.message_sound_engine.status()
+        except Exception as error:
+            self.handle_exception(error, {"module": "audio/message_sound.py", "operation": "status"})
+            sound_status = {"enabled": False, "provider": "indisponível", "last_error": str(error)}
+
+        try:
             git_summary = self.git_awareness_engine.summary()
         except Exception as error:
             self.handle_exception(error, {"module": "git_awareness", "operation": "summary"})
@@ -576,6 +655,8 @@ Mensagem do usuário:
                 "error": llm_health.get("error", ""),
             },
             "voice": voice_status,
+            "sound": sound_status,
+            "last_response_metadata": self.last_response_metadata,
             "memory": {
                 "memories": safe_count(self.memory.count_memories),
                 "short_term": safe_count(self.memory.count_short_term_memory),
@@ -626,14 +707,37 @@ Mensagem do usuário:
             f"World Model: {saved.get('world', {})}"
         )
 
-    def _finalize_response(self, response, route_result=None):
-        route = (route_result or {}).get("route", "")
-        self.conversation_context.add_athena_message(response, route=route)
-        return self._speak(response)
+    def _finalize_response(self, response, route_result=None, started_at=None, user_input="", metadata=None):
+        route_result = route_result or {}
+        metadata = metadata if isinstance(metadata, dict) else {}
+        route = route_result.get("route", "")
+        response_text = str(response or "")
+        self.conversation_context.add_athena_message(response_text, route=route)
+
+        # Voice is interface output. It must never affect the cognitive result.
+        spoken = self._speak(response_text)
+        metadata["used_voice"] = bool(spoken)
+
+        if started_at is None:
+            started_at = time.perf_counter()
+        final_metadata = self.conversation_metrics.finish(started_at, user_input, metadata)
+        self.last_response_metadata = final_metadata
+
+        if self.settings.get("showRouteMetadata", False):
+            debug = (
+                f"\n\n[debug: route={final_metadata.get('route')} | "
+                f"duration={final_metadata.get('duration_ms')}ms | "
+                f"used_llm={final_metadata.get('used_llm')} | "
+                f"world={final_metadata.get('used_world_model')} | "
+                f"reasoning={final_metadata.get('used_reasoning')} | "
+                f"agency={final_metadata.get('used_agency')}]"
+            )
+            return response_text + debug
+        return response_text
 
     def _speak(self, response):
         try:
-            self.voice_engine.speak(response)
+            return bool(self.voice_engine.speak(response))
         except Exception as error:
             self.handle_exception(error, {"module": "voice/voice_engine.py", "operation": "speak"})
-        return response
+            return False

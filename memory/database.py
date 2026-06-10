@@ -838,6 +838,21 @@ class MemoryDB:
         cursor.execute(query, params)
         return cursor.fetchall()
 
+    def find_entities(self, name_fragment=None, entity_type=None, limit=20):
+        query = "SELECT id, name, entity_type, created_at FROM entities WHERE 1=1"
+        params = []
+        if name_fragment:
+            query += " AND lower(name) LIKE lower(?)"
+            params.append(f"%{str(name_fragment).strip()}%")
+        if entity_type:
+            query += " AND entity_type = ?"
+            params.append(str(entity_type).strip().lower())
+        query += " ORDER BY name ASC LIMIT ?"
+        params.append(int(limit or 20))
+        cursor = self.conn.cursor()
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
     def count_entities(self):
         cursor = self.conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM entities")
@@ -872,8 +887,8 @@ class MemoryDB:
         cursor.execute(query, params)
         return cursor.fetchall()
 
-    def list_world_relationships(self):
-        return self.find_world_relationships()
+    def list_world_relationships(self, source=None, relation=None, target=None):
+        return self.find_world_relationships(source=source, relation=relation, target=target)
 
     def count_world_relationships(self):
         cursor = self.conn.cursor()

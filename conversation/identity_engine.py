@@ -5,19 +5,17 @@ class IdentityEngine:
         self.identity = identity or {}
         self.self_model = self_model
 
-    def respond(self, user_input=None):
-        if self.self_model:
-            try:
-                state = self.self_model.state()
-                return (
-                    f"Eu sou {state.get('name', 'Athena')}, uma entidade digital persistente em evolução.\n"
-                    f"Fui criada por {state.get('creator', 'Rewell')}.\n"
-                    f"Meu propósito é {state.get('purpose', 'construir conhecimento, memória e autonomia gradual')}.\n"
-                    "Minha identidade, memória e objetivos pertencem ao Athena Core; LLMs são módulos cognitivos que eu uso, não a minha identidade inteira."
-                )
-            except Exception:
-                pass
+    def respond(self, user_input=None, operation=None, target=None):
+        operation = operation or "describe_self"
+        if operation == "creator":
+            return f"Fui criada por você, {self.identity.get('creator', 'Rewell')}."
+        if operation == "describe_creator":
+            return self.describe_creator()
         return (
-            f"Eu sou {self.identity.get('name', 'Athena')}, uma entidade digital persistente em evolução. "
-            f"Fui criada por {self.identity.get('creator', 'Rewell')}."
+            f"Eu sou {self.identity.get('name', 'Athena')}, uma entidade digital criada por você para aprender, lembrar, raciocinar e evoluir. "
+            "Minha identidade, memória e objetivos pertencem ao Athena Core; LLMs são módulos cognitivos que eu uso."
         )
+
+    def describe_creator(self):
+        creator = self.identity.get("creator", "Rewell")
+        return f"{creator} é meu criador e a pessoa que está conduzindo minha evolução."

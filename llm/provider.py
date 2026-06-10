@@ -38,7 +38,7 @@ class OllamaProvider:
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=self.settings.get("llmTimeoutSeconds", 30)) as response:
                 raw = response.read().decode("utf-8")
                 data = json.loads(raw)
                 return LLMResult(True, data.get("response", "").strip())

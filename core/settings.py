@@ -39,7 +39,19 @@ DEFAULT_SETTINGS = {
     "guiBlockConcurrentMessages": True,
     "errorAwarenessEnabled": True,
     "conversationFirst": True,
-    "knowledgeExtractionEntryPoint": "learning_route_only"
+    "knowledgeExtractionEntryPoint": "learning_route_only",
+    "messageReceivedSoundEnabled": True,
+    "messageReceivedSoundProvider": "system_beep",
+    "debugMode": False,
+    "showRouteMetadata": False,
+    "useNaturalResponses": True,
+    "useFastConversationPath": True,
+    "voiceRate": 180,
+    "voiceVolume": 1.0,
+    "voiceProfile": "default",
+    "llmTimeoutSeconds": 30,
+    "conversationMetricsEnabled": True,
+    "naturalResponseForSmallTalk": True,
 }
 
 
