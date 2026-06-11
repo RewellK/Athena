@@ -59,6 +59,77 @@ class AthenaV126Tests(unittest.TestCase):
         self.assertEqual(metadata["extraction_llm_calls"], 0)
         self.assertEqual(metadata["natural_response_llm_calls"], 0)
 
+    def test_llm_unavailable_entity_query_uses_cognitive_control(self):
+        self.athena.settings.values["useLLM"] = False
+        self.athena.llm_provider.reset_calls()
+
+        response = self.athena.chat("que legal, consegue me falar quem é a Fernanda?")
+        metadata = self.athena.last_response_metadata
+
+        self.assertEqual(metadata["route"], "world_query")
+        self.assertEqual(metadata["intent"], "entity_query")
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("Ainda não tenho informações suficientes", response)
+        self.assertNotIn("Não entendi", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+    def test_llm_unavailable_learning_candidate_does_not_fall_to_unknown(self):
+        self.athena.settings.values["useLLM"] = False
+        self.athena.llm_provider.reset_calls()
+
+        response = self.athena.chat("Fernanda é minha namorada.")
+        metadata = self.athena.last_response_metadata
+
+        self.assertEqual(metadata["route"], "learning")
+        self.assertEqual(metadata["intent"], "learning_candidate")
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("ensinando algo novo", response)
+        self.assertNotIn("Não entendi", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+    def test_llm_unavailable_teach_intent_is_local(self):
+        self.athena.settings.values["useLLM"] = False
+        self.athena.llm_provider.reset_calls()
+
+        response = self.athena.chat("Entendi, posso te ensinar, que tal?")
+        metadata = self.athena.last_response_metadata
+
+        self.assertEqual(metadata["route"], "teach_intent")
+        self.assertEqual(metadata["intent"], "teach_intent")
+        self.assertIn("Pode me ensinar", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+    def test_pending_confirmation_and_identity_are_non_blocking(self):
+        self.athena.pending_world_extraction = self.athena._make_pending(
+            "world_model_confirmation",
+            "Pessoa Exemplo é importante.",
+            extraction={
+                "entities": [{"name": "Pessoa Exemplo", "type": "person", "confidence": 0.70}],
+                "relationships": [],
+                "events": [],
+                "states": [],
+                "temporal_references": [],
+            },
+            decision={"decision": "confirm", "confidence": 0.70, "reason": "teste"},
+        )
+
+        response = self.athena.chat("ótimo, quem é você?")
+        self.assertEqual(self.athena.last_response_metadata["route"], "identity")
+        self.assertIn("Eu sou Athena", response)
+        self.assertIsNotNone(self.athena.pending_world_extraction)
+
+        response = self.athena.chat("sim")
+        self.assertEqual(self.athena.last_response_metadata["route"], "pending_confirmation")
+        self.assertIn("Atualizei meu World Model", response)
+        self.assertIsNone(self.athena.pending_world_extraction)
+
+    def test_unknown_recovery_without_recent_failure_does_not_loop(self):
+        response = self.athena.chat("o que você não entendeu?")
+        self.assertEqual(self.athena.last_response_metadata["route"], "system")
+        self.assertEqual(self.athena.last_response_metadata["intent"], "unknown_recovery")
+        self.assertIn("Não tenho uma falha de classificação recente", response)
+        self.assertNotEqual(response, "Não entendi com segurança o que você quer agora. Pode me explicar de outro jeito?")
+
     def test_current_external_requests_do_not_invent_without_tool(self):
         for message in [
             "Qual o preço atual do bitcoin?",

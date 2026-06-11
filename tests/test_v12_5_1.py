@@ -162,7 +162,7 @@ class AthenaV1251Tests(unittest.TestCase):
     def test_unknown_recovery_explains_previous_classification_failure(self):
         self.athena.settings.values["useFastConversationPath"] = False
         self.athena.settings.values["useLLM"] = False
-        first = self.athena.chat("oq você pode fazer?")
+        first = self.athena.chat("zorb flarn sem rota clara")
         self.assertIn("Não entendi com segurança", first)
         self.assertIsNotNone(self.athena.last_unknown_interaction)
 
@@ -173,7 +173,7 @@ class AthenaV1251Tests(unittest.TestCase):
 
         self.assertEqual(self.athena.last_response_metadata["route"], "system")
         self.assertIn("falhei ao classificar", response)
-        self.assertIn("capacidades", response)
+        self.assertIn("zorb flarn", response)
         self.assertNotIn("Pode me explicar de outro jeito?", response)
         self.assertEqual(self.athena.last_response_metadata["llm_calls"], 0)
         self.assertEqual(self.athena.llm_provider.prompts, [])

@@ -6,7 +6,7 @@ V12.6 e um passe de estabilizacao antes da V13. O objetivo nao foi criar uma nov
 
 > Athena usa LLMs. LLMs nao sao Athena.
 
-Resultado: a base esta pronta para iniciar V13, com ressalvas documentadas em `docs/V12_6_READINESS_REPORT.md`.
+Resultado: a base esta pronta para iniciar V13, com ressalvas documentadas em `docs/V12_6_READINESS_REPORT.md`. A validacao obrigatoria de conversa foi executada via `Athena.chat()` com banco temporario.
 
 ## 2. Version History Audit
 
@@ -53,11 +53,16 @@ Foram inspecionados: `README.md`, `AUDIT_V11.md`, `AUDIT_V12.md`, `AUDIT_V12_1.m
 ## 5. Files Changed
 
 - `brain/orchestrator.py`
+- `conversation/cognitive_control_engine.py`
 - `conversation/conversation_metrics.py`
 - `conversation/conversation_router.py`
+- `world_model/knowledge_extraction_engine.py`
 - `inspect_memory.py`
 - `scripts/reset_knowledge_db.py`
 - `tests/test_v12_6.py`
+- `tests/manual_conversation_v12_6.py`
+- `docs/V12_6_COGNITIVE_CONTROL.md`
+- `docs/V12_6_CONVERSATION_TRANSCRIPT.md`
 - `docs/MAC_LAUNCHER.md`
 - `docs/VOICE_CONFIGURATION.md`
 - `docs/PERFORMANCE_NOTES.md`
@@ -67,11 +72,15 @@ Foram inspecionados: `README.md`, `AUDIT_V11.md`, `AUDIT_V12.md`, `AUDIT_V12_1.m
 ## 6. What Was Fixed
 
 - Metricas por etapa de LLM: intent, relevance, extraction, reasoning, natural response e follow-up.
+- `CognitiveControlEngine` explicito para rotas locais genericas e fallback quando a LLM de intencao esta indisponivel.
+- Consultas como `quem e X?`, `voce sabe quem e X?` e `consegue me falar quem e X?` preservam `entity_query`.
+- Afirmações ensinaveis claras viram `learning_candidate` em vez de `unknown` quando a LLM de intencao falha.
+- `teach_intent` responde localmente a pedidos como `posso te ensinar?`.
 - `total_duration_ms` e `tts_duration_ms` foram adicionados sem remover campos antigos.
 - Consultas externas atuais genericas, como preco/eventos atuais, agora caem em resposta honesta de ferramenta ausente sem inventar fatos.
 - Reset seguro de banco foi adicionado com confirmacao forte e backup obrigatorio.
 - `inspect_memory.py` agora exibe metricas recentes de conversa quando existirem.
-- Testes V12.6 cobrem local-first, metricas, fonte externa ausente e reset seguro.
+- Testes V12.6 cobrem local-first, metricas, LLM indisponivel, entity query, learning candidate, teach intent, fonte externa ausente, pending confirmation e reset seguro.
 
 ## 7. What Was Not Changed
 
@@ -87,20 +96,23 @@ Foram inspecionados: `README.md`, `AUDIT_V11.md`, `AUDIT_V12.md`, `AUDIT_V12_1.m
 Nao foram adicionados hardcodes cognitivos de entidades como Fernanda, Francisco ou Rewell em producao. Exemplos com esses nomes permanecem em testes e docs.
 
 Pontos observados:
-- `conversation/conversation_router.py` contem fast paths operacionais para classes genericas: greeting, identity, capability, entity query, pending confirmation, external tool missing, status/error.
-- Termos como clima/noticias/preco/eventos atuais aparecem apenas para classificar ausencia de ferramenta externa, nao para responder fatos.
+- `conversation/cognitive_control_engine.py` contem fast paths operacionais para classes genericas: greeting, identity, capability, entity query, teach intent, pending confirmation, external tool missing, status/error e unknown recovery.
+- O caminho de ferramenta externa ausente usa classe generica de informacao atual e nao responde fatos externos.
 - `brain/orchestrator.py` contem verbalizacoes por tipo de relacao (`father_of`, `girlfriend_of`) herdadas de V12.5. Isso nao e hardcode de entidade, mas deve ser revisitado em V13 se a naturalizacao relacional for generalizada.
 
 ## 9. LLM Call Minimization Report
 
 Metricas adicionadas:
 - `llm_calls`
+- `llm_call_count`
 - `intent_llm_calls`
 - `relevance_llm_calls`
 - `extraction_llm_calls`
 - `reasoning_llm_calls`
 - `natural_response_llm_calls`
 - `follow_up_llm_calls`
+- `used_memory`
+- `pending_confirmation`
 - `tts_duration_ms`
 - `total_duration_ms`
 
@@ -120,6 +132,7 @@ Memory, World Model e Relevance permanecem coerentes:
 - consultas explicitas de entidade preservam rota de consulta;
 - confirmacoes pendentes nao bloqueiam troca de assunto;
 - relacoes aprendidas sao recuperadas localmente quando possivel.
+- com `useLLM=false`, Athena reconhece ensino claro, mas nao finge que estruturou conhecimento.
 
 ## 11. GUI / Launcher Status
 
@@ -148,16 +161,18 @@ Athena evita inventar fatos externos atuais. Sem ferramenta configurada, respond
 - `python3 -m py_compile $(find . -name '*.py')`
 - `git diff --check`
 - `python3 inspect_memory.py`
+- `python3 tests/manual_conversation_v12_6.py`
 
 ## 15. Test Results
 
 - `tests.test_v12_5`: OK, 5 testes.
 - `tests.test_v12_5_1`: OK, 9 testes.
-- `tests.test_v12_6`: OK, 5 testes.
+- `tests.test_v12_6`: OK, 10 testes.
 - `tests.test_asl_v0`: OK, 1 teste.
 - `py_compile`: OK.
 - `git diff --check`: OK.
 - `inspect_memory.py`: OK; inspeção completou e exibiu métricas recentes.
+- `tests/manual_conversation_v12_6.py`: OK; transcript registrado em `docs/V12_6_CONVERSATION_TRANSCRIPT.md`.
 
 ## 16. Known Limitations
 
@@ -179,8 +194,36 @@ Athena evita inventar fatos externos atuais. Sem ferramenta configurada, respond
 - [x] Launcher macOS existe.
 - [x] Reset seguro com backup existe.
 - [x] Documentacao de prontidao existe.
-- [ ] Desktop Presence ainda nao deve comecar antes de validar manualmente a GUI.
+- [x] Caminho `Athena.chat()` usado pela GUI foi validado por conversa manual com banco temporario.
+- [ ] GUI ainda deve ser validada pelo usuario no desktop real antes de evoluir a presenca visual.
 
 ## 18. Recommendation
 
 Recomendacao: Athena esta pronta para iniciar V13 Desktop Presence como proxima etapa, desde que V13 respeite a fundacao atual e nao transforme a GUI em um segundo cerebro.
+
+## 19. Cognitive Control Architecture
+
+A V12.6 agora possui `CognitiveControlEngine`, usado pelo `ConversationRouter` antes da LLM de intencao e novamente como fallback quando a LLM esta indisponivel ou com baixa confianca. Ele escolhe rotas locais, mas nao extrai conhecimento nem responde fatos por nomes fixos.
+
+Decisao local vs LLM:
+- perguntas simples de identidade, capacidade, entidade conhecida, erro, confirmacao pendente e informacao externa atual sem ferramenta seguem caminho local;
+- aprendizado novo ainda passa por World Model, Relevance e Consolidation;
+- raciocinio complexo e naturalizacao sem resposta local continuam podendo usar LLM.
+
+## 20. Manual Conversation Evidence
+
+Conversa executada com `python3 tests/manual_conversation_v12_6.py`. Resumo dos pontos criticos:
+
+- `que legal, consegue me falar quem é a Fernanda?` -> `world_query`, `llm_calls=0`, desconhecimento natural.
+- `Fernanda é minha namorada.` -> `learning`, salva estrutura com apoio da LLM de extracao.
+- `quem é Fernanda?` -> `world_query`, `llm_calls=0`, resposta local: `Fernanda é sua namorada.`
+- `Quem é Francisco?` -> `world_query`, `llm_calls=0`, resposta local: `Francisco é seu pai.`
+- `Hoje meu dia foi muito bom, o que você pode fazer?` -> `capability`, `llm_calls=0`.
+- `o que você não entendeu?` -> `unknown_recovery`, sem loop de fallback.
+- `Qual a previsão do clima hoje?` -> `external_information`, `llm_calls=0`, sem inventar ferramenta.
+
+Transcript completo: `docs/V12_6_CONVERSATION_TRANSCRIPT.md`.
+
+## 21. V13 Decision
+
+Athena esta pronta para preparar a V13, nao para pular a fundacao. A proxima etapa deve construir presenca desktop sobre o Core atual, mantendo Memory, World Model, Reasoning, SelfModel, Context, Agency e Relevance como fontes da inteligencia propria.

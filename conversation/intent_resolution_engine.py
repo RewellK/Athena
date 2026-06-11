@@ -28,6 +28,7 @@ class IntentResolutionEngine:
         "learning",
         "agency",
         "system",
+        "teach_intent",
         "error_query",
         "external_information",
         "small_talk",
@@ -107,7 +108,7 @@ Identidade mínima:
 
 Intenções permitidas:
 self_identity, user_identity, creator_query, entity_query, capability_query, capabilities, capability, technical_capability,
-self_status, memory_query, world_query, reasoning, learning, agency, system,
+self_status, memory_query, world_query, reasoning, learning, agency, system, teach_intent,
 error_query, external_information, small_talk, greeting, conversation, unknown
 
 Tipos de alvo permitidos:
@@ -139,6 +140,7 @@ Orientação de decisão:
 - Pergunta sobre o usuário/criador: intent=user_identity, target_type=user, requires_memory=true.
 - Pergunta sobre entidade/pessoa/objeto/conceito conhecido: intent=entity_query, target_type=entity, requires_world_model=true, requires_memory=true.
 - Informação nova fornecida pelo usuário: intent=learning, should_learn=true.
+- Pedido explícito para ensinar Athena: intent=teach_intent, target_type=self.
 - Pedido de informação externa não disponível internamente: intent=external_information, target_type=tool, requires_tool=true.
 - Afirmação nova sobre a relação usuário-Athena: intent=learning, target_type=self ou user conforme o alvo principal, should_learn=true.
 - Pergunta operacional sobre Git/voz/configuração/status: intent=system ou self_status.

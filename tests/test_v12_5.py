@@ -251,6 +251,17 @@ class FakeLLM:
                     {"source": "Francisco", "relation": "owns", "target": "Palio 2008", "confidence": 0.90},
                 ],
             }
+        if message == "Fernanda é minha namorada.":
+            return {
+                **empty,
+                "entities": [
+                    {"name": "Fernanda", "type": "person", "confidence": 0.96},
+                    {"name": "Rewell", "type": "person", "confidence": 0.96},
+                ],
+                "relationships": [
+                    {"source": "Fernanda", "relation": "girlfriend_of", "target": "Rewell", "confidence": 0.95},
+                ],
+            }
         if message.startswith("Fernanda é") or message.startswith("A Fernanda é"):
             return {
                 **empty,
@@ -308,6 +319,8 @@ class FakeLLM:
         return "Ainda não tenho informações suficientes sobre essa entidade."
 
     def _learning_response(self, prompt):
+        if "Fernanda é minha namorada." in prompt:
+            return "Entendi, Rewell. Vou guardar que Fernanda é sua namorada."
         if "Fernanda" in prompt:
             return "Entendi, Rewell. Isso parece muito importante para você. Vou guardar que Fernanda é sua namorada, que você pretende se casar com ela e que ela é o amor da sua vida. Quer me contar mais sobre a Fernanda?"
         if "Palio 2008" in prompt:

@@ -61,6 +61,8 @@ class KnowledgeExtractionEngine:
     def _llm_extract(self, text, supplemental_context=None):
         if not self.llm_provider:
             return None
+        if self.settings and not self.settings.get("useLLM", True):
+            return None
 
         prompt = self._build_extraction_prompt(text, supplemental_context)
         try:

@@ -207,11 +207,13 @@ class Athena:
             "target": intention.get("target", ""),
             "used_llm": route_result.get("source", "").startswith("llm"),
             "used_world_model": False,
+            "used_memory": bool(route_result.get("requires_memory", False)),
             "used_reasoning": False,
             "used_agency": False,
             "used_voice": False,
             "used_sound": self.settings.get("messageReceivedSoundEnabled", True),
             "llm_calls": 0,
+            "llm_call_count": 0,
             "_llm_calls_before": llm_calls_before,
             "local_fast_path": str(route_result.get("source", "")).startswith("local_"),
             "route_source": route_result.get("source", ""),
@@ -237,6 +239,7 @@ class Athena:
             "saved_to_memory": False,
             "updated_world_model": False,
             "follow_up_generated": False,
+            "pending_confirmation": self._pending_state().get("pending_type"),
             "required_tool": route_result.get("tool_name") if route_result.get("requires_tool") else None,
             "tool_available": False,
         }
@@ -292,8 +295,10 @@ class Athena:
             "used_agency": False,
             "used_voice": bool(should_speak),
             "used_sound": False,
+            "used_memory": False,
             "local_fast_path": True,
             "route_source": "local_startup_greeting",
+            "llm_call_count": 0,
             "startup_ms": int((time.perf_counter() - started_at) * 1000),
             "tts_duration_ms": 0,
         }
@@ -322,6 +327,8 @@ class Athena:
             "learning": "knowledge_input",
             "agency": "agency_request",
             "system": "question",
+            "teach_intent": "conversation",
+            "pending_confirmation": "confirmation",
             "external_information": "tool_information_request",
             "error_query": "error_awareness_request",
             "unknown": "unknown",
@@ -354,6 +361,7 @@ class Athena:
             "requires_tool": route_result.get("requires_tool", False),
             "tool_name": route_result.get("tool_name"),
             "requires_memory": route_result.get("requires_memory", False),
+            "should_learn": bool(route_result.get("should_learn", route == "learning")),
             "legacy_route": legacy_route_by_route.get(route, "conversation"),
             "goal": route_result.get("summary", ""),
             "summary": route_result.get("summary", ""),
@@ -396,6 +404,9 @@ class Athena:
 
         if route == "technical_capability":
             return self.capability_engine.respond(technical=True)
+
+        if route == "teach_intent":
+            return self._handle_teach_intent_route()
 
         if route == "self_status":
             return self.self_status_engine.respond()
@@ -514,11 +525,10 @@ class Athena:
             )
             if entity_answer:
                 return entity_answer
+            return f"Ainda não tenho informações suficientes sobre {target}."
         response = self.world_model.answer(user_input)
         if response:
             return response
-        if target:
-            return f"Ainda não tenho informações suficientes sobre {target}."
         return None
 
     def _describe_entity_from_memory(self, target, technical=False, user_input=""):
@@ -581,7 +591,7 @@ class Athena:
             if fast_response:
                 return fast_response
 
-        if self.llm_provider and self.settings.get("useNaturalResponses", True):
+        if self.llm_provider and self.settings.get("useNaturalResponses", True) and self.settings.get("useLLM", True):
             try:
                 prompt = f"""
 Você é o NaturalResponseEngine da Athena.
@@ -698,6 +708,9 @@ Fatos estruturados:
         if operation == "unknown_recovery":
             return self._explain_last_unknown()
 
+        if operation == "teach_intent":
+            return self._handle_teach_intent_route()
+
         if subsystem == "voice" or operation == "voice_status":
             try:
                 status = self.voice_engine.status()
@@ -723,6 +736,9 @@ Fatos estruturados:
         if request.get("positive_day_context") and not technical:
             return f"Que bom que seu dia foi bom, {self.creator_name}. Sobre o que eu posso fazer:\n\n{response}"
         return response
+
+    def _handle_teach_intent_route(self):
+        return f"Claro, {self.creator_name}. Pode me ensinar. Eu vou tentar estruturar o que você disser no meu World Model e pedir confirmação quando faltar segurança."
 
     def _remember_unknown_classification(self, user_input, intention):
         self.last_unknown_interaction = {
@@ -1088,7 +1104,7 @@ Fatos estruturados:
             "consolidation_plan": plan,
             "follow_up_question": follow_up,
         }
-        if self.llm_provider and self.settings.get("useNaturalResponses", True):
+        if self.llm_provider and self.settings.get("useNaturalResponses", True) and self.settings.get("useLLM", True):
             try:
                 natural_calls_before = self._llm_call_count()
                 prompt = f"""
@@ -1115,6 +1131,12 @@ Resultado estruturado do Core:
             except Exception as error:
                 self._add_llm_delta(metadata, "natural_response_llm_calls", natural_calls_before)
                 self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "format_learning_natural"})
+
+        if extraction.get("source") == "llm_unavailable" and not self._has_extracted_knowledge(extraction):
+            return (
+                "Entendi que você está me ensinando algo novo. Minha extração estrutural por LLM não está disponível agora, "
+                "então não vou fingir que gravei isso no World Model. Pode me dizer de forma mais direta ou tentar novamente quando a extração estiver ativa?"
+            )
 
         score = self._as_score(relevance.get("relevance_score", relevance.get("importance_score", 0)))
         if self._as_score(relevance.get("identity_score", 0)) >= 80 and self._learning_concerns_self(intention, extraction):
@@ -1389,6 +1411,8 @@ Resultado estruturado do Core:
             "original_route": "pending_confirmation",
             "source": "local_pending_confirmation",
             "intent_interpretation_ms": 0,
+            "intent_llm_calls": 0,
+            "relevance_llm_calls": 0,
         }
 
     def _make_pending(self, pending_type, text, **payload):
@@ -1639,7 +1663,11 @@ Mensagem do usuário:
         if llm_calls_before is not None:
             llm_calls_after = self._llm_call_count()
             metadata["llm_calls"] = max(0, llm_calls_after - llm_calls_before)
+            metadata["llm_call_count"] = metadata["llm_calls"]
             metadata["used_llm"] = bool(metadata.get("used_llm") or metadata["llm_calls"] > 0)
+        else:
+            metadata["llm_call_count"] = metadata.get("llm_calls", 0)
+        metadata["pending_confirmation"] = self._pending_state().get("pending_type")
         metadata["response_ms"] = int((time.perf_counter() - started_at) * 1000)
         final_metadata = self.conversation_metrics.finish(started_at, user_input, metadata)
         self.last_response_metadata = final_metadata

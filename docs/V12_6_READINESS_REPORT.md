@@ -2,11 +2,11 @@
 
 ## Athena esta pronta para V13 Desktop Presence?
 
-Sim, com ressalvas. Athena esta pronta para iniciar V13 como camada de presenca desktop, desde que a V13 seja construida sobre o Core atual e nao substitua memoria, World Model, reasoning, relevance ou conversation routing por logica de GUI.
+Sim, com ressalvas. Athena esta pronta para iniciar V13 como camada de presenca desktop, desde que a V13 seja construida sobre o Core atual e nao substitua memoria, World Model, reasoning, relevance, cognitive control ou conversation routing por logica de GUI.
 
 ## O que deve ser corrigido antes da V13?
 
-- Validar manualmente a GUI usando o roteiro V12.6.
+- Validar manualmente a GUI no desktop real usando o roteiro V12.6. O caminho `Athena.chat()` usado pela GUI ja foi validado com banco temporario em `tests/manual_conversation_v12_6.py`.
 - Publicar a `main` se as credenciais GitHub locais permitirem.
 - Confirmar em uso real que `Athena.command` abre a GUI no ambiente do usuario.
 - Confirmar que o banco local atual nao esta corrompido usando `python3 inspect_memory.py`.
@@ -17,6 +17,7 @@ Sim, com ressalvas. Athena esta pronta para iniciar V13 como camada de presenca 
 - UI mais rica de voz/presenca.
 - Botao visual de reset seguro.
 - Generalizacao mais elegante de verbalizacao relacional.
+- Reduzir chamadas LLM para respostas curtas como `sim` quando nao ha confirmacao pendente.
 - ASL versionado e integrado de forma opcional, se ainda fizer sentido.
 
 ## ASL
@@ -53,3 +54,17 @@ V12.6 deixa Athena pronta para iniciar V13, mas a primeira tarefa de V13 deve se
 - `py_compile`: OK
 - `git diff --check`: OK
 - `inspect_memory.py`: OK
+- `tests/manual_conversation_v12_6.py`: OK
+
+## Evidencia de conversa real
+
+Transcript completo: `docs/V12_6_CONVERSATION_TRANSCRIPT.md`.
+
+Pontos confirmados:
+
+- consulta de entidade desconhecida nao cai em `unknown`;
+- aprendizado novo nao vira `unknown`;
+- consulta de entidade conhecida usa World Model/memoria local com `llm_calls=0`;
+- capability query local usa `llm_calls=0`;
+- unknown recovery nao repete fallback;
+- informacao externa atual sem ferramenta nao e inventada.

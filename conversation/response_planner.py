@@ -39,5 +39,6 @@ class ResponsePlanner:
             "capabilities": "capability",
             "technical_capability": "technical_capability",
             "external_information": "external_information",
+            "teach_intent": "teach_intent",
         }
         return route_by_intent.get(intent, intent if intent else "conversation")

@@ -1,3 +1,4 @@
+from conversation.cognitive_control_engine import CognitiveControlEngine
 from conversation.intent_resolution_engine import IntentResolutionEngine
 from conversation.response_planner import ResponsePlanner
 from conversation.target_resolution_engine import TargetResolutionEngine
@@ -26,6 +27,8 @@ class ConversationRouter:
         "learning",
         "agency",
         "system",
+        "teach_intent",
+        "pending_confirmation",
         "error_query",
         "external_information",
         "conversation",
@@ -42,9 +45,10 @@ class ConversationRouter:
         self.target_resolution_engine = TargetResolutionEngine()
         self.response_planner = ResponsePlanner()
         self.relevance_engine = relevance_engine or RelevanceEngine(llm_provider, self.identity, logger, settings)
+        self.cognitive_control_engine = CognitiveControlEngine(self.identity, settings)
 
     def route(self, user_input, session_context=None, pending_state=None):
-        fast_route = self._fast_route(user_input)
+        fast_route = self._fast_route(user_input, pending_state=pending_state)
         if fast_route:
             return fast_route
 
@@ -53,9 +57,19 @@ class ConversationRouter:
         intent_llm_calls = max(0, self._llm_call_count() - llm_calls_before)
         target = self.target_resolution_engine.resolve(resolution)
         if not resolution.get("available", True):
+            fallback = self._cognitive_fallback_route(user_input, pending_state, source_suffix="+llm_unavailable_fallback")
+            if fallback:
+                fallback["intent_llm_calls"] = intent_llm_calls
+                return fallback
             unavailable = self._unavailable_route(resolution)
             unavailable["intent_llm_calls"] = intent_llm_calls
             return unavailable
+
+        if resolution.get("intent") == "unknown" or self._confidence(resolution.get("confidence"), 0.0) < 0.35:
+            fallback = self._cognitive_fallback_route(user_input, pending_state, source_suffix="+llm_low_confidence_fallback")
+            if fallback:
+                fallback["intent_llm_calls"] = intent_llm_calls
+                return fallback
 
         interpretation = dict(resolution)
         interpretation.update({
@@ -99,47 +113,23 @@ class ConversationRouter:
             "relevance_llm_calls": relevance_llm_calls,
         }
 
-    def _fast_route(self, user_input):
+    def _fast_route(self, user_input, pending_state=None):
         if not self.settings:
             return None
         if not self.settings.get("fastPathEnabled", self.settings.get("useFastConversationPath", True)):
             return None
         if not self.settings.get("useFastConversationPath", True):
             return None
-        identity_route = self._fast_identity_route(user_input)
-        if identity_route:
-            return identity_route
-        capability_route = self._fast_capability_route(user_input)
-        if capability_route:
-            return capability_route
-        error_route = self._fast_error_query(user_input)
-        if error_route:
-            return error_route
-        external_route = self._fast_external_tool_missing(user_input)
-        if external_route:
-            return external_route
-        unknown_recovery = self._fast_unknown_recovery(user_input)
-        if unknown_recovery:
-            return unknown_recovery
-        memory_query = self._fast_memory_query(user_input)
-        if memory_query and self.settings.get("fastPathEntityQueries", self.settings.get("useFastMemoryQueryPath", True)):
-            return self._fast_route_result(
-                route="world_query",
-                intent="entity_query",
-                target=memory_query,
-                target_type="entity",
-                requires_memory=True,
-                should_query_world_model=True,
-                source="local_fast_memory_query",
-            )
-        conversation_route = self._fast_conversation_route(user_input) if self.settings.get("fastPathGreetings", True) else None
-        if conversation_route:
-            return self._fast_route_result(
-                route=conversation_route,
-                intent=conversation_route,
-                source="local_fast_conversation",
-            )
-        return None
+        return self.cognitive_control_engine.classify(user_input, pending_state=pending_state)
+
+    def _cognitive_fallback_route(self, user_input, pending_state=None, source_suffix=""):
+        route = self.cognitive_control_engine.classify(user_input, pending_state=pending_state)
+        if not route:
+            return None
+        if source_suffix:
+            route = dict(route)
+            route["source"] = f"{route.get('source', 'local_cognitive_control')}{source_suffix}"
+        return route
 
     def _fast_route_result(
         self,
@@ -478,16 +468,9 @@ class ConversationRouter:
         query_words = {"qual", "quais", "quando", "onde", "como", "quanto", "quantos", "quantas", "que"}
         if not (set(words) & query_words):
             return None
-        weather_terms = {"clima", "tempo", "temperatura", "previsao"}
-        news_terms = {"noticia", "noticias", "manchetes"}
-        if set(words) & weather_terms:
-            tool_name = "previsão do clima"
-        elif set(words) & news_terms:
-            tool_name = "notícias"
-        elif self._current_external_request(words):
-            tool_name = "fonte externa atual"
-        else:
+        if not self._current_external_request(words):
             return None
+        tool_name = "informação externa atual"
         return self._fast_route_result(
             route="external_information",
             intent="external_information",
@@ -533,10 +516,8 @@ class ConversationRouter:
 
     def _current_external_request(self, words):
         word_set = set(words)
-        current_terms = {"hoje", "agora", "atual", "atuais", "tempo", "real"}
-        price_terms = {"preco", "precos", "valor", "valores", "cotacao", "cotacoes"}
-        event_terms = {"evento", "eventos", "agenda", "acontecimentos"}
-        return bool(word_set & current_terms and (word_set & price_terms or word_set & event_terms))
+        current_terms = {"hoje", "agora", "atual", "atuais", "real", "previsao", "cotacao", "manchetes"}
+        return bool(word_set & current_terms)
 
     def _llm_call_count(self):
         provider = getattr(self, "llm_provider", None)
