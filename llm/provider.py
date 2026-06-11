@@ -17,7 +17,7 @@ class OllamaProvider:
         self.settings = settings
         self.logger = logger
 
-    def generate(self, prompt):
+    def generate(self, prompt, timeout_seconds=None):
         if not self.settings.get("useLLM", True):
             return LLMResult(False, "", "LLM desativada em config/settings.json")
 
@@ -37,8 +37,9 @@ class OllamaProvider:
             method="POST"
         )
 
+        timeout = timeout_seconds if timeout_seconds is not None else self.settings.get("llmTimeoutSeconds", 30)
         try:
-            with urllib.request.urlopen(request, timeout=self.settings.get("llmTimeoutSeconds", 30)) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read().decode("utf-8")
                 data = json.loads(raw)
                 return LLMResult(True, data.get("response", "").strip())

@@ -52,7 +52,7 @@ class IntentResolutionEngine:
 
         prompt = self._build_prompt(user_input, session_context, pending_state)
         try:
-            result = self.llm_provider.generate(prompt)
+            result = self._generate_intent(prompt)
             if not result.available or not result.text:
                 error = result.error if result else "sem resposta da LLM"
                 return self._unavailable_result(started_at, error)
@@ -64,6 +64,15 @@ class IntentResolutionEngine:
             if self.logger:
                 self.logger.log("INTENT_RESOLUTION_ERROR", str(error))
             return self._unavailable_result(started_at, str(error))
+
+    def _generate_intent(self, prompt):
+        timeout = None
+        if self.settings:
+            timeout = self.settings.get("intentResolutionTimeoutSeconds", self.settings.get("llmTimeoutSeconds", 30))
+        try:
+            return self.llm_provider.generate(prompt, timeout_seconds=timeout)
+        except TypeError:
+            return self.llm_provider.generate(prompt)
 
     def _build_prompt(self, user_input, session_context=None, pending_state=None):
         creator = self.identity.get("creator", "Rewell")
