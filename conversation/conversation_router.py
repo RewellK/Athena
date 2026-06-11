@@ -55,9 +55,10 @@ class ConversationRouter:
             "target_type": target.get("target_type"),
         })
         plan = self.response_planner.plan(interpretation)
+        plan = self._apply_query_precedence(user_input, plan)
         relevance = self._evaluate_relevance(user_input, plan, target, session_context)
         original_route = plan.get("route", "conversation")
-        plan = self._apply_relevance(plan, relevance)
+        plan = self._apply_relevance(user_input, plan, relevance)
         route = plan.get("route", "conversation")
         if route not in self.VALID_ROUTES:
             route = "unknown"
@@ -138,8 +139,44 @@ class ConversationRouter:
                 self.logger.log("ROUTER_RELEVANCE_ERROR", str(error))
             return {}
 
-    def _apply_relevance(self, plan, relevance):
+    def _apply_query_precedence(self, user_input, plan):
+        if not self._looks_like_explicit_query(user_input):
+            return plan
+        route = plan.get("route")
+        if route in {"world_query", "question_about_user", "memory_query", "identity", "reasoning", "external_information", "system"}:
+            return plan
+        target = str(plan.get("target") or "").strip()
+        target_type = str(plan.get("target_type") or "unknown")
+        if not target:
+            return plan
+        if target_type == "entity":
+            return self._query_plan(plan, route="world_query", intent="entity_query")
+        if target_type == "user":
+            return self._query_plan(plan, route="question_about_user", intent="user_identity")
+        if target_type == "world":
+            return self._query_plan(plan, route="world_query", intent="world_query")
+        return plan
+
+    def _query_plan(self, plan, route, intent):
+        adjusted = dict(plan)
+        adjusted.update({
+            "route": route,
+            "intent": intent,
+            "requires_memory": True,
+            "should_learn": False,
+            "should_query_world_model": route in {"world_query", "question_about_user"},
+            "summary": "explicit_query",
+            "source": f"{plan.get('source', 'conversation_router')}+query_precedence",
+        })
+        return adjusted
+
+    def _apply_relevance(self, user_input, plan, relevance):
         if not isinstance(relevance, dict) or not relevance:
+            return plan
+        route = plan.get("route")
+        if route in {"world_query", "question_about_user", "memory_query"}:
+            return plan
+        if self._looks_like_explicit_query(user_input):
             return plan
         priority = str(relevance.get("memory_priority") or "ignore")
         try:
@@ -148,7 +185,6 @@ class ConversationRouter:
             score = 0
         if priority == "ignore" and score < 50:
             return plan
-        route = plan.get("route")
         if route in {"greeting", "small_talk", "conversation", "unknown"} or (route == "identity" and score >= 75):
             adjusted = dict(plan)
             adjusted.update({
@@ -161,3 +197,45 @@ class ConversationRouter:
             })
             return adjusted
         return plan
+
+    def _looks_like_explicit_query(self, user_input):
+        text = str(user_input or "").strip()
+        if not text:
+            return False
+        normalized = self._normalize_query_text(text)
+        if "?" in text:
+            return True
+        question_openers = {
+            "quem",
+            "que",
+            "qual",
+            "quais",
+            "quando",
+            "onde",
+            "como",
+            "porque",
+            "por que",
+            "quanto",
+            "quantos",
+            "quantas",
+        }
+        return any(normalized == opener or normalized.startswith(f"{opener} ") for opener in question_openers)
+
+    def _normalize_query_text(self, text):
+        normalized = str(text or "").strip().lower()
+        for source, target in {
+            "á": "a",
+            "à": "a",
+            "ã": "a",
+            "â": "a",
+            "é": "e",
+            "ê": "e",
+            "í": "i",
+            "ó": "o",
+            "ô": "o",
+            "õ": "o",
+            "ú": "u",
+            "ç": "c",
+        }.items():
+            normalized = normalized.replace(source, target)
+        return " ".join(normalized.split())

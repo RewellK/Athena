@@ -127,6 +127,8 @@ class FakeLLM:
         if message in {"Quem é Francisco?", "Quem é Fernanda?"}:
             target = message.replace("Quem é ", "").replace("?", "")
             return self._intent_payload("entity_query", target, "entity", requires_memory=True, requires_world_model=True)
+        if message == "quem é fernanda?":
+            return self._intent_payload("conversation", "Fernanda", "entity", requires_memory=True)
         if message == "Como você chegou nessa conclusão?":
             return self._intent_payload("reasoning", "", "world", requires_reasoning=True, structured_request={"operation": "explain_last_conclusion"})
         if "o que meu pai será dela" in message:
@@ -139,7 +141,7 @@ class FakeLLM:
             return self._intent_payload("learning", "Francisco", "entity", should_learn=True)
         if message.startswith("Ele gosta"):
             return self._intent_payload("learning", "Francisco", "entity", should_learn=True)
-        if message.startswith("Fernanda é"):
+        if message.startswith("Fernanda é") or message.startswith("A Fernanda é"):
             return self._intent_payload("learning", "Fernanda", "entity", should_learn=True)
         if message.startswith("Eu te criei") or message.startswith("Eu gosto muito"):
             return self._intent_payload("learning", "Athena", "self", should_learn=True)
@@ -164,8 +166,10 @@ class FakeLLM:
         return payload
 
     def _relevance(self, message):
-        if message.startswith("Fernanda é"):
+        if message.startswith("Fernanda é") or message.startswith("A Fernanda é"):
             return self._relevance_payload(96, 92, 94, 70, 88, "long_candidate", True, "Quer me contar mais sobre a Fernanda?")
+        if message == "quem é fernanda?":
+            return self._relevance_payload(96, 92, 94, 70, 88, "long_candidate", True, "Você conhece Fernanda? Como vocês se conhecem?")
         if message.startswith("Você não é minha assistente") or message.startswith("Eu te criei") or message.startswith("Eu gosto muito"):
             return self._relevance_payload(94, 88, 86, 92, 82, "long_candidate", True, "Quando você fala sobre minha importância para você, quer que eu registre isso como parte da nossa relação?")
         if message.startswith("Meu pai"):
@@ -209,7 +213,7 @@ class FakeLLM:
                     {"source": "Francisco", "relation": "owns", "target": "Palio 2008", "confidence": 0.90},
                 ],
             }
-        if message.startswith("Fernanda é"):
+        if message.startswith("Fernanda é") or message.startswith("A Fernanda é"):
             return {
                 **empty,
                 "entities": [
@@ -358,6 +362,19 @@ class AthenaV125Tests(unittest.TestCase):
         self.assertIn("Atualizei meu World Model", response)
         self.assertIsNone(self.athena.pending_world_extraction)
         self.assertIn(("Entidade Teste", "related_to", "Athena"), self.relationships())
+
+    def test_entity_question_precedence_over_relevance_learning(self):
+        response = self.athena.chat("A Fernanda é minha namorada, eu amo ela, e vou me casar com ela.")
+        self.assertEqual(self.athena.last_response_metadata["route"], "learning")
+        self.assertIn(("Fernanda", "girlfriend_of", "Rewell"), self.relationships())
+        self.assertIn(("Rewell", "plans_to_marry", "Fernanda"), self.relationships())
+
+        response = self.athena.chat("quem é fernanda?")
+        self.assertEqual(self.athena.last_response_metadata["route"], "world_query")
+        self.assertIn("Fernanda é sua namorada", response)
+        self.assertIn("pretende se casar com ela", response)
+        self.assertNotIn("Vou guardar", response)
+        self.assertNotIn("Você conhece Fernanda?", response)
 
     def test_v12_5_acceptance_flow(self):
         response = self.athena.chat("Meu pai é o Francisco.")
