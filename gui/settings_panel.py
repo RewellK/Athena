@@ -11,6 +11,9 @@ class SettingsPanel(ctk.CTkFrame):
         ("showRouteMetadata", "Mostrar rota/tempo no chat", ""),
         ("useNaturalResponses", "Respostas naturais", ""),
         ("useFastConversationPath", "Caminho rápido conversacional", ""),
+        ("fastPathEnabled", "Fast paths ativos", ""),
+        ("fastPathGreetings", "Fast path de saudação", ""),
+        ("fastPathEntityQueries", "Fast path de consulta local", ""),
         ("useLLMIntentResolution", "Resolver intenção com LLM", ""),
         (
             "allowLocalIntentFallback",
@@ -18,6 +21,15 @@ class SettingsPanel(ctk.CTkFrame):
             "Essa opção reativa fallback local para intenção. Use apenas em emergência, pois pode enfraquecer a arquitetura LLM-first.",
         ),
         ("voiceEnabled", "Voz ativa", ""),
+        ("voiceSpeakResponses", "Falar respostas", ""),
+        ("voiceSpeakStartupGreeting", "Falar saudação inicial", ""),
+        ("startupGreetingEnabled", "Saudação inicial na GUI", ""),
+        ("startupGreetingSpeak", "Voz na saudação inicial", ""),
+        (
+            "pendingConfirmationBlocksConversation",
+            "Confirmação pendente bloqueia conversa",
+            "Essa opção reativa o comportamento antigo em que uma confirmação pendente bloqueia novos assuntos.",
+        ),
         ("useLLM", "Usar LLM", ""),
         ("confirmExternalKnowledge", "Confirmar conhecimento externo", ""),
         (
@@ -39,7 +51,7 @@ class SettingsPanel(ctk.CTkFrame):
         ("enableProactivity", "Proatividade ativa", ""),
     ]
 
-    VOICE_PROVIDERS = ["piper", "macos_say"]
+    VOICE_PROVIDERS = ["none", "macos_say", "piper", "online_tts", "openai_tts"]
     SOUND_PROVIDERS = ["system_beep", "terminal_bell"]
 
     def __init__(self, master, athena, on_refresh=None):
@@ -68,7 +80,7 @@ class SettingsPanel(ctk.CTkFrame):
         self.voice_frame = ctk.CTkFrame(self)
         self.voice_frame.pack(fill="x", padx=8, pady=6)
         ctk.CTkLabel(self.voice_frame, text="Provider de voz").grid(row=0, column=0, sticky="w", padx=8, pady=4)
-        self.voice_provider_var = ctk.StringVar(value=str(self.athena.settings.get("voiceProvider", "piper")))
+        self.voice_provider_var = ctk.StringVar(value=str(self.athena.settings.get("voiceProvider", "macos_say")))
         self.voice_provider_menu = ctk.CTkOptionMenu(
             self.voice_frame,
             values=self.VOICE_PROVIDERS,
@@ -125,7 +137,7 @@ class SettingsPanel(ctk.CTkFrame):
         self.athena.settings.reload()
         for key, variable in self.vars.items():
             variable.set(bool(self.athena.settings.get(key, False)))
-        self.voice_provider_var.set(str(self.athena.settings.get("voiceProvider", "piper")))
+        self.voice_provider_var.set(str(self.athena.settings.get("voiceProvider", "macos_say")))
         self.sound_provider_var.set(str(self.athena.settings.get("messageReceivedSoundProvider", "system_beep")))
         lines = [
             "CONFIGURAÇÕES ATUAIS",
@@ -135,14 +147,23 @@ class SettingsPanel(ctk.CTkFrame):
             f"Mostrar metadata de rota: {self.athena.settings.get('showRouteMetadata')}",
             f"Respostas naturais: {self.athena.settings.get('useNaturalResponses')}",
             f"Caminho rápido: {self.athena.settings.get('useFastConversationPath')}",
+            f"Fast paths ativos: {self.athena.settings.get('fastPathEnabled')}",
+            f"Fast path saudação: {self.athena.settings.get('fastPathGreetings')}",
+            f"Fast path consulta local: {self.athena.settings.get('fastPathEntityQueries')}",
             f"Resolução de intenção por LLM: {self.athena.settings.get('useLLMIntentResolution')}",
             f"Fallback local de intenção: {self.athena.settings.get('allowLocalIntentFallback')}",
-            f"Voz ativa: {self.athena.settings.get('voiceEnabled', True)}",
+            f"Voz ativa: {self.athena.settings.get('voiceEnabled', False)}",
+            f"Falar respostas: {self.athena.settings.get('voiceSpeakResponses')}",
+            f"Falar saudação inicial: {self.athena.settings.get('voiceSpeakStartupGreeting')}",
             f"Provider de voz: {self.athena.settings.get('voiceProvider')}",
             f"Fallback de voz: {self.athena.settings.get('fallbackVoiceProvider')}",
+            f"Nome da voz: {self.athena.settings.get('voiceName')}",
             f"Perfil de voz: {self.athena.settings.get('voiceProfile')}",
             f"Velocidade de voz: {self.athena.settings.get('voiceRate')}",
             f"Volume de voz: {self.athena.settings.get('voiceVolume')}",
+            f"Saudação inicial GUI: {self.athena.settings.get('startupGreetingEnabled')}",
+            f"Voz na saudação inicial: {self.athena.settings.get('startupGreetingSpeak')}",
+            f"Confirmação pendente bloqueia conversa: {self.athena.settings.get('pendingConfirmationBlocksConversation')}",
             f"LLM ativa: {self.athena.settings.get('useLLM')}",
             f"Modelo LLM: {self.athena.settings.get('ollamaModel')}",
             f"Git somente leitura: {self.athena.settings.get('gitReadOnly')}",

@@ -33,10 +33,19 @@ class FakeSettings:
             "showRouteMetadata": False,
             "conversationMetricsEnabled": False,
             "voiceEnabled": False,
+            "voiceSpeakResponses": True,
+            "voiceSpeakStartupGreeting": False,
+            "startupGreetingEnabled": True,
+            "startupGreetingSpeak": False,
             "useFastConversationPath": True,
+            "fastPathEnabled": True,
+            "fastPathGreetings": True,
+            "fastPathEntityQueries": True,
             "useFastMemoryQueryPath": True,
             "fastMemoryResponses": True,
             "fastLocalSmallTalkResponses": True,
+            "pendingConfirmationBlocksConversation": False,
+            "pendingConfirmationTtlSeconds": 300,
             "intentResolutionTimeoutSeconds": 8,
         }
         self.values.update(values or {})
@@ -59,6 +68,12 @@ class NullVoice:
     def speak(self, _text):
         return False
 
+    def speak_startup(self, _text):
+        return False
+
+    def status(self):
+        return {"last_submit_ms": 0}
+
 
 class NullErrorCapture:
     def capture(self, error, context):
@@ -80,8 +95,10 @@ class FakeLLM:
     def __init__(self):
         self.prompts = []
         self.timeouts = []
+        self.call_count = 0
 
     def generate(self, prompt, timeout_seconds=None):
+        self.call_count += 1
         self.prompts.append(prompt)
         self.timeouts.append(timeout_seconds)
         if "módulo de resolução de intenção" in prompt:
@@ -113,6 +130,7 @@ class FakeLLM:
     def reset_calls(self):
         self.prompts = []
         self.timeouts = []
+        self.call_count = 0
 
     def count_prompts(self, marker):
         return sum(1 for prompt in self.prompts if marker in prompt)
@@ -340,6 +358,7 @@ def make_athena(tmp_path):
     athena.pending_world_extraction = None
     athena.pending_knowledge_ingestion = None
     athena.pending_plan = None
+    athena.pending_history = []
     return athena
 
 

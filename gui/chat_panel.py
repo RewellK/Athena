@@ -97,6 +97,9 @@ class ChatPanel(ctk.CTkFrame):
         if self.on_message_processed:
             self.on_message_processed()
 
+    def append_athena_message(self, text):
+        self._append("Athena", text)
+
     def _append(self, speaker, text):
         self.chat_box.configure(state="normal")
         self.chat_box.insert("end", f"\n{speaker}: {text}\n")

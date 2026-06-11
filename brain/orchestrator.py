@@ -1,5 +1,6 @@
 import json
 import time
+from datetime import datetime
 
 from agency.action_engine import ActionEngine
 from audio.message_sound import MessageSoundEngine
@@ -163,6 +164,7 @@ class Athena:
         self.pending_world_extraction = None
         self.pending_knowledge_ingestion = None
         self.pending_plan = None
+        self.pending_history = []
 
     def chat(self, user_input):
         try:
@@ -174,13 +176,20 @@ class Athena:
         started_at = self.conversation_metrics.start()
         self.message_sound_engine.play_received()
         self.conversation_context.add_user_message(user_input)
+        self._expire_pending_confirmations()
+        had_pending_before = self._has_pending_confirmation()
+        llm_calls_before = self._llm_call_count()
 
-        pending_state = self._pending_state()
-        route_result = self.conversation_router.route(
-            user_input,
-            session_context=self.conversation_context,
-            pending_state=pending_state,
-        )
+        pending_control = self._pending_control(user_input)
+        if pending_control:
+            route_result = self._pending_route_result(pending_control)
+        else:
+            pending_state = self._pending_state()
+            route_result = self.conversation_router.route(
+                user_input,
+                session_context=self.conversation_context,
+                pending_state=pending_state,
+            )
 
         intention = self._route_to_intention(route_result, user_input)
         intention_id = self.memory.save_intention(
@@ -201,7 +210,16 @@ class Athena:
             "used_agency": False,
             "used_voice": False,
             "used_sound": self.settings.get("messageReceivedSoundEnabled", True),
+            "llm_calls": 0,
+            "_llm_calls_before": llm_calls_before,
+            "local_fast_path": str(route_result.get("source", "")).startswith("local_"),
+            "route_source": route_result.get("source", ""),
             "intent_interpretation_ms": route_result.get("intent_interpretation_ms", 0),
+            "relevance_ms": relevance.get("duration_ms", 0),
+            "extraction_ms": 0,
+            "world_query_ms": 0,
+            "response_ms": 0,
+            "tts_ms": 0,
             "relevance_score": relevance.get("relevance_score", 0),
             "emotional_score": relevance.get("emotional_score", 0),
             "relationship_score": relevance.get("relationship_score", 0),
@@ -221,10 +239,48 @@ class Athena:
 
         response = self._delegate_conversation_route(intention_id, intention, user_input, metadata)
         if response:
+            response = self._with_pending_reminder(response, had_pending_before, pending_control, metadata)
             return self._finalize_response(response, route_result, started_at, user_input, metadata)
 
         fallback = self.conversation_engine.respond(user_input, route_result, self.conversation_context)
+        fallback = self._with_pending_reminder(fallback, had_pending_before, pending_control, metadata)
         return self._finalize_response(fallback, route_result, started_at, user_input, metadata)
+
+    def startup_greeting(self, now=None, speak=None):
+        started_at = time.perf_counter()
+        current = now or datetime.now()
+        hour = current.hour
+        if 5 <= hour < 12:
+            greeting = "Bom dia"
+        elif 12 <= hour < 18:
+            greeting = "Boa tarde"
+        else:
+            greeting = "Boa noite"
+        response = f"{greeting}, {self.creator_name}. Athena iniciada. Estou pronta para conversar."
+        should_speak = self.settings.get("startupGreetingSpeak", False)
+        if speak is not None:
+            should_speak = bool(speak)
+        if should_speak:
+            try:
+                self.voice_engine.speak_startup(response)
+            except Exception as error:
+                self.handle_exception(error, {"module": "voice/voice_engine.py", "operation": "speak_startup"})
+        self.last_response_metadata = {
+            "route": "startup_greeting",
+            "intent": "startup_greeting",
+            "target": "",
+            "used_llm": False,
+            "llm_calls": 0,
+            "used_world_model": False,
+            "used_reasoning": False,
+            "used_agency": False,
+            "used_voice": bool(should_speak),
+            "used_sound": False,
+            "local_fast_path": True,
+            "route_source": "local_startup_greeting",
+            "startup_ms": int((time.perf_counter() - started_at) * 1000),
+        }
+        return response
 
     def _route_to_intention(self, route_result, user_input):
         route_result = route_result if isinstance(route_result, dict) else {}
@@ -336,7 +392,9 @@ class Athena:
 
         if route == "world_query":
             metadata["used_world_model"] = True
+            query_started_at = time.perf_counter()
             response = self._handle_world_query(intention, user_input)
+            metadata["world_query_ms"] = int((time.perf_counter() - query_started_at) * 1000)
             return response or self._natural_response(user_input, intention)
 
         if route == "reasoning":
@@ -742,12 +800,15 @@ Fatos estruturados:
     def _handle_learning_route(self, intention, user_input, metadata=None):
         metadata = metadata if isinstance(metadata, dict) else {}
         supplemental_context = self._learning_supplemental_context(intention, user_input)
+        extraction_started_at = time.perf_counter()
         extraction, decision = self.world_model.propose(user_input, supplemental_context=supplemental_context)
+        metadata["extraction_ms"] = int((time.perf_counter() - extraction_started_at) * 1000)
 
         route_relevance = intention.get("relevance") if isinstance(intention.get("relevance"), dict) else {}
         if self._can_reuse_route_relevance(route_relevance):
             relevance = self._enrich_relevance_from_extraction(route_relevance, extraction)
         else:
+            relevance_started_at = time.perf_counter()
             relevance = self.relevance_engine.evaluate(
                 user_message=user_input,
                 resolved_intent=intention,
@@ -758,6 +819,7 @@ Fatos estruturados:
                 current_user_identity={"name": self.creator_name},
                 self_identity=self.identity,
             )
+            relevance["duration_ms"] = int((time.perf_counter() - relevance_started_at) * 1000)
             relevance = self._merge_relevance(route_relevance, relevance)
 
         plan = self.consolidation_planner.plan(
@@ -802,12 +864,20 @@ Fatos estruturados:
             self.memory.save_world_extraction(user_input, extraction, saved)
             metadata["updated_world_model"] = any(saved.get(key, 0) for key in ("entities", "relationships", "events", "states"))
         elif plan.get("update_world_model") and decision_name == "confirm":
-            self.pending_world_extraction = {"text": user_input, "extraction": extraction, "decision": decision}
+            self.pending_world_extraction = self._make_pending(
+                "world_model_confirmation",
+                user_input,
+                extraction=extraction,
+                decision=decision,
+            )
             self.memory.save_world_extraction(user_input, extraction, {"decision": decision, "saved": False})
         elif self._has_extracted_knowledge(extraction):
             self.memory.save_world_extraction(user_input, extraction, {"decision": decision, "saved": False})
 
-        return self._format_learning_natural(user_input, intention, extraction, decision, saved, relevance, plan, follow_up)
+        response = self._format_learning_natural(user_input, intention, extraction, decision, saved, relevance, plan, follow_up)
+        if plan.get("update_world_model") and decision_name == "confirm":
+            response = self._append_world_confirmation_prompt(response, decision, extraction)
+        return response
 
     def _can_reuse_route_relevance(self, relevance):
         if not isinstance(relevance, dict) or not relevance:
@@ -1025,7 +1095,12 @@ Resultado estruturado do Core:
             return self._format_world_saved(saved)
 
         if decision_name == "confirm":
-            self.pending_world_extraction = {"text": user_input, "extraction": extraction, "decision": decision}
+            self.pending_world_extraction = self._make_pending(
+                "world_model_confirmation",
+                user_input,
+                extraction=extraction,
+                decision=decision,
+            )
             return (
                 "Encontrei estruturas possíveis, mas preciso da sua confirmação antes de registrar.\n"
                 f"Confiança média: {decision.get('confidence', 0):.2f}\n"
@@ -1071,6 +1146,7 @@ Resultado estruturado do Core:
         if self.pending_world_extraction:
             if intention_type == "approval":
                 pending = self.pending_world_extraction
+                self._set_pending_status(pending, "approved")
                 self.pending_world_extraction = None
                 saved = self.world_model.apply_extraction(pending["extraction"])
                 saved["decision"] = pending["decision"]
@@ -1078,33 +1154,44 @@ Resultado estruturado do Core:
                 self.memory.save_world_extraction(pending["text"], pending["extraction"], saved)
                 return self._format_world_saved(saved)
             if intention_type == "rejection":
+                self._set_pending_status(self.pending_world_extraction, "rejected")
                 self.pending_world_extraction = None
                 return "Tudo bem. Não salvei essa estrutura no World Model."
-            return "Ainda preciso saber se você autoriza salvar a estrutura proposta."
+            if self.settings.get("pendingConfirmationBlocksConversation", False):
+                return "Ainda preciso saber se você autoriza salvar a estrutura proposta."
+            return None
 
         if self.pending_knowledge_ingestion:
             if intention_type == "approval":
                 pending = self.pending_knowledge_ingestion
+                self._set_pending_status(pending, "approved")
                 self.pending_knowledge_ingestion = None
                 saved = self.knowledge_ingestion_engine.apply(pending)
                 return self._format_knowledge_ingestion_saved(saved)
             if intention_type == "rejection":
+                self._set_pending_status(self.pending_knowledge_ingestion, "rejected")
                 self.pending_knowledge_ingestion = None
                 return "Tudo bem. Não transformei essa fonte em conhecimento permanente."
-            return "Ainda preciso saber se você autoriza transformar essa fonte em conhecimento permanente."
+            if self.settings.get("pendingConfirmationBlocksConversation", False):
+                return "Ainda preciso saber se você autoriza transformar essa fonte em conhecimento permanente."
+            return None
 
         if self.pending_plan:
             if intention_type == "approval":
                 plan_id = self.pending_plan["plan_id"]
+                self._set_pending_status(self.pending_plan, "approved")
                 self.pending_plan = None
                 executed = self.agency_engine.approve_plan(plan_id)
                 return "Plano aprovado. Registrei o resultado controlado das ações:\n" + "\n".join(f"- {item}" for item in executed)
             if intention_type == "rejection":
                 plan_id = self.pending_plan["plan_id"]
+                self._set_pending_status(self.pending_plan, "rejected")
                 self.pending_plan = None
                 rejected = self.agency_engine.reject_plan(plan_id)
                 return "Plano rejeitado. Registrei que a ação não foi autorizada."
-            return "Ainda preciso saber se você autoriza o plano proposto."
+            if self.settings.get("pendingConfirmationBlocksConversation", False):
+                return "Ainda preciso saber se você autoriza o plano proposto."
+            return None
 
         return None
 
@@ -1113,8 +1200,44 @@ Resultado estruturado do Core:
         if intention_type in {"approval", "rejection"}:
             return intention_type
         text = self._normalize_pending_reply(user_input)
-        approvals = {"sim", "s", "yes", "y", "ok", "okay", "pode", "autorizo", "confirmo", "claro"}
-        rejections = {"nao", "não", "n", "no", "negativo", "cancela", "cancelar", "rejeito"}
+        approvals = {
+            "sim",
+            "s",
+            "yes",
+            "y",
+            "ok",
+            "okay",
+            "pode",
+            "autorizo",
+            "confirmo",
+            "claro",
+            "salvar",
+            "salve",
+            "guarde",
+            "guardar",
+            "sim pode",
+            "pode salvar",
+            "pode salve",
+            "pode guardar",
+        }
+        rejections = {
+            "nao",
+            "não",
+            "n",
+            "no",
+            "negativo",
+            "cancela",
+            "cancelar",
+            "rejeito",
+            "nao salve",
+            "não salve",
+            "nao salvar",
+            "não salvar",
+            "nao guarde",
+            "não guarde",
+            "ignora",
+            "ignorar",
+        }
         if text in approvals:
             return "approval"
         if text in rejections:
@@ -1139,18 +1262,151 @@ Resultado estruturado do Core:
             ".": "",
             "!": "",
             "?": "",
+            ",": " ",
+            ";": " ",
+            ":": " ",
         }.items():
             normalized = normalized.replace(source, target)
-        return normalized.strip()
+        return " ".join(normalized.split())
 
     def _pending_state(self):
         if self.pending_world_extraction:
-            return {"pending_type": "world_model_confirmation"}
+            return self._public_pending_state(self.pending_world_extraction, "world_model_confirmation")
         if self.pending_knowledge_ingestion:
-            return {"pending_type": "knowledge_ingestion_confirmation"}
+            return self._public_pending_state(self.pending_knowledge_ingestion, "knowledge_ingestion_confirmation")
         if self.pending_plan:
-            return {"pending_type": "agency_plan_confirmation"}
+            return self._public_pending_state(self.pending_plan, "agency_plan_confirmation")
         return {"pending_type": "none"}
+
+    def _pending_control(self, user_input):
+        if not self._has_pending_confirmation():
+            return None
+        intent_type = self._pending_intention_type({}, user_input)
+        return intent_type if intent_type in {"approval", "rejection"} else None
+
+    def _pending_route_result(self, control):
+        operation = "approval" if control == "approval" else "rejection"
+        return {
+            "route": "pending_confirmation",
+            "intent": operation,
+            "target": "",
+            "target_type": "unknown",
+            "summary": operation,
+            "confidence": 1.0,
+            "needs_clarification": False,
+            "requires_memory": False,
+            "requires_tool": False,
+            "tool_name": None,
+            "should_learn": False,
+            "should_use_llm_response": False,
+            "should_query_world_model": False,
+            "should_query_self_model": False,
+            "should_use_reasoning": False,
+            "should_use_agency": False,
+            "structured_request": {"operation": operation},
+            "relevance": {},
+            "original_route": "pending_confirmation",
+            "source": "local_pending_confirmation",
+            "intent_interpretation_ms": 0,
+        }
+
+    def _make_pending(self, pending_type, text, **payload):
+        created_at = datetime.now()
+        ttl_seconds = self._pending_ttl_seconds()
+        expires_at = created_at.timestamp() + ttl_seconds if ttl_seconds > 0 else None
+        pending = {
+            "id": f"{pending_type}:{int(created_at.timestamp() * 1000)}",
+            "pending_type": pending_type,
+            "text": text,
+            "summary": self._pending_summary(text),
+            "created_at": created_at.isoformat(timespec="seconds"),
+            "expires_at": datetime.fromtimestamp(expires_at).isoformat(timespec="seconds") if expires_at else None,
+            "expires_at_ts": expires_at,
+            "status": "pending",
+        }
+        pending.update(payload)
+        return pending
+
+    def _pending_ttl_seconds(self):
+        try:
+            return int(self.settings.get("pendingConfirmationTtlSeconds", 300))
+        except (TypeError, ValueError):
+            return 300
+
+    def _pending_summary(self, text, limit=80):
+        summary = " ".join(str(text or "").split())
+        if len(summary) > limit:
+            return summary[:limit - 3].rstrip() + "..."
+        return summary or "confirmação pendente"
+
+    def _public_pending_state(self, pending, fallback_type):
+        pending = pending if isinstance(pending, dict) else {}
+        return {
+            "pending_type": pending.get("pending_type", fallback_type),
+            "id": pending.get("id", ""),
+            "summary": pending.get("summary") or self._pending_summary(pending.get("text")),
+            "status": pending.get("status", "pending"),
+            "created_at": pending.get("created_at"),
+            "expires_at": pending.get("expires_at"),
+        }
+
+    def _active_pending(self):
+        return self.pending_world_extraction or self.pending_knowledge_ingestion or self.pending_plan
+
+    def _has_pending_confirmation(self):
+        return bool(self._active_pending())
+
+    def _expire_pending_confirmations(self):
+        now_ts = time.time()
+        for attr in ("pending_world_extraction", "pending_knowledge_ingestion", "pending_plan"):
+            pending = getattr(self, attr, None)
+            if not isinstance(pending, dict):
+                continue
+            expires_at = pending.get("expires_at_ts")
+            if expires_at and now_ts > float(expires_at):
+                self._set_pending_status(pending, "expired")
+                setattr(self, attr, None)
+
+    def _set_pending_status(self, pending, status):
+        if isinstance(pending, dict):
+            pending["status"] = status
+            pending["resolved_at"] = datetime.now().isoformat(timespec="seconds")
+            if not hasattr(self, "pending_history"):
+                self.pending_history = []
+            self.pending_history.append(dict(pending))
+
+    def _with_pending_reminder(self, response, had_pending_before, pending_control, metadata=None):
+        if not had_pending_before or pending_control:
+            return response
+        if not self._has_pending_confirmation():
+            return response
+        if self.settings.get("pendingConfirmationBlocksConversation", False):
+            return response
+        response_text = str(response or "")
+        if "Você autoriza" in response_text or "autoriza salvar" in response_text:
+            return response_text
+        pending = self._active_pending()
+        state = self._public_pending_state(pending, pending.get("pending_type", "confirmation") if isinstance(pending, dict) else "confirmation")
+        if metadata is not None:
+            metadata["pending_reminder_appended"] = True
+            metadata["pending_type"] = state.get("pending_type")
+        return (
+            f"{response_text}\n\n"
+            f"Ainda deixei pendente a confirmação sobre: {state.get('summary')}. "
+            "Quando quiser, responda 'sim' para salvar ou 'não' para descartar."
+        )
+
+    def _append_world_confirmation_prompt(self, response, decision, extraction):
+        response_text = str(response or "").strip()
+        if "Você autoriza salvar essa estrutura" in response_text:
+            return response_text
+        prompt = (
+            "Encontrei estruturas possíveis, mas preciso da sua confirmação antes de registrar.\n"
+            f"Confiança média: {decision.get('confidence', 0):.2f}\n"
+            f"{self.world_model.format_extraction_preview(extraction)}\n"
+            "Você autoriza salvar essa estrutura no World Model?"
+        )
+        return f"{response_text}\n\n{prompt}" if response_text else prompt
 
     def _natural_response(self, user_input, intention):
         if self.llm_provider:
@@ -1281,11 +1537,24 @@ Mensagem do usuário:
         self.conversation_context.add_athena_message(response_text, route=route)
 
         # Voice is interface output. It must never affect the cognitive result.
+        speak_started_at = time.perf_counter()
         spoken = self._speak(response_text)
+        metadata["tts_ms"] = int((time.perf_counter() - speak_started_at) * 1000)
         metadata["used_voice"] = bool(spoken)
+        if spoken:
+            try:
+                metadata["tts_ms"] = max(metadata["tts_ms"], int(self.voice_engine.status().get("last_submit_ms", 0)))
+            except Exception:
+                pass
 
         if started_at is None:
             started_at = time.perf_counter()
+        llm_calls_before = metadata.pop("_llm_calls_before", None)
+        if llm_calls_before is not None:
+            llm_calls_after = self._llm_call_count()
+            metadata["llm_calls"] = max(0, llm_calls_after - llm_calls_before)
+            metadata["used_llm"] = bool(metadata.get("used_llm") or metadata["llm_calls"] > 0)
+        metadata["response_ms"] = int((time.perf_counter() - started_at) * 1000)
         final_metadata = self.conversation_metrics.finish(started_at, user_input, metadata)
         self.last_response_metadata = final_metadata
 
@@ -1307,3 +1576,17 @@ Mensagem do usuário:
         except Exception as error:
             self.handle_exception(error, {"module": "voice/voice_engine.py", "operation": "speak"})
             return False
+
+    def _llm_call_count(self):
+        provider = getattr(self, "llm_provider", None)
+        if not provider:
+            return 0
+        if hasattr(provider, "call_count"):
+            try:
+                return int(provider.call_count)
+            except (TypeError, ValueError):
+                return 0
+        prompts = getattr(provider, "prompts", None)
+        if isinstance(prompts, list):
+            return len(prompts)
+        return 0

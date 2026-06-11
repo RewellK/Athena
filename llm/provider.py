@@ -16,8 +16,10 @@ class OllamaProvider:
     def __init__(self, settings, logger=None):
         self.settings = settings
         self.logger = logger
+        self.call_count = 0
 
     def generate(self, prompt, timeout_seconds=None):
+        self.call_count += 1
         if not self.settings.get("useLLM", True):
             return LLMResult(False, "", "LLM desativada em config/settings.json")
 

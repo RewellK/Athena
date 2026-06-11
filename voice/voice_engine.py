@@ -1,60 +1,62 @@
-from voice.providers.macos_provider import MacOSProvider
-from voice.providers.piper_provider import PiperProvider
+import threading
+import time
+
+from voice.voice_config import VoiceConfig
+from voice.voice_manager import VoiceManager
 
 
 class VoiceEngine:
+    """Non-blocking voice facade for Athena responses."""
 
     def __init__(self, settings, logger=None):
         self.settings = settings
         self.logger = logger
+        self.config = VoiceConfig(settings)
+        self.manager = VoiceManager(settings, logger)
         self.last_error = ""
-        self.last_provider = self.settings.get("voiceProvider", "piper")
+        self.last_provider = self.config.provider
+        self.last_submit_ms = 0
+        self._lock = threading.RLock()
 
     def speak(self, text):
-        self.last_error = ""
-        self.last_provider = self.settings.get("voiceProvider", "piper")
-        if not self.settings.get("voiceEnabled", False):
+        if not self.config.enabled or not self.config.speak_responses:
             return False
+        return self._submit(text)
 
-        provider_name = self.settings.get("voiceProvider", "piper")
-        fallback_name = self.settings.get("fallbackVoiceProvider", "macos_say")
-
-        try:
-            self._provider(provider_name).speak(text)
-            self.last_provider = provider_name
-            return True
-        except Exception as error:
-            self.last_error = f"{provider_name}: {error}"
-            if self.logger:
-                self.logger.log("VOICE_PROVIDER_FAILED", f"{provider_name}: {error}")
-
-        try:
-            self._provider(fallback_name).speak(text)
-            self.last_provider = fallback_name
-            return True
-        except Exception as error:
-            self.last_error = f"{fallback_name}: {error}"
-            if self.logger:
-                self.logger.log("VOICE_FALLBACK_FAILED", f"{fallback_name}: {error}")
-
-        return False
+    def speak_startup(self, text):
+        if not self.config.enabled or not self.config.speak_startup_greeting:
+            return False
+        return self._submit(text)
 
     def status(self):
         enabled = bool(self.settings.get("voiceEnabled", False))
-        return {
-            "enabled": enabled,
-            "status": "ativa" if enabled else "inativa",
-            "provider": self.settings.get("voiceProvider", "piper"),
-            "fallback_provider": self.settings.get("fallbackVoiceProvider", "macos_say"),
-            "last_provider": self.last_provider,
-            "last_error": self.last_error,
-        }
+        with self._lock:
+            return {
+                "enabled": enabled,
+                "status": "ativa" if enabled else "inativa",
+                "provider": self.settings.get("voiceProvider", "macos_say"),
+                "fallback_provider": self.settings.get("fallbackVoiceProvider", "macos_say"),
+                "last_provider": self.last_provider,
+                "last_error": self.last_error,
+                "last_submit_ms": self.last_submit_ms,
+                "available_providers": self.manager.provider_ids(),
+            }
 
-    def _provider(self, name):
-        if name == "piper":
-            return PiperProvider(self.settings, self.logger)
+    def _submit(self, text):
+        started_at = time.perf_counter()
+        thread = threading.Thread(target=self._speak_background, args=(str(text or ""),), daemon=True, name="athena-voice")
+        thread.start()
+        with self._lock:
+            self.last_submit_ms = int((time.perf_counter() - started_at) * 1000)
+            self.last_error = ""
+            self.last_provider = self.settings.get("voiceProvider", "macos_say")
+        return True
 
-        if name == "macos_say":
-            return MacOSProvider(self.settings, self.logger)
-
-        raise ValueError(f"Provider de voz desconhecido: {name}")
+    def _speak_background(self, text):
+        spoken = self.manager.speak(text)
+        with self._lock:
+            self.last_provider = self.manager.last_provider
+            self.last_error = self.manager.last_error
+            self.last_submit_ms = self.manager.last_submit_ms
+        if not spoken and self.manager.last_error and self.logger:
+            self.logger.log("VOICE_OUTPUT_SKIPPED", self.manager.last_error)

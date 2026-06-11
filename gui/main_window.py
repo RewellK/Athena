@@ -54,6 +54,22 @@ class AthenaDesktopApp(ctk.CTk):
         self.settings_panel.pack(fill="both", expand=True, padx=8, pady=8)
 
         self.refresh_all()
+        self.after(150, self.show_startup_greeting)
+
+    def show_startup_greeting(self):
+        if not self.athena.settings.get("startupGreetingEnabled", True):
+            return
+        try:
+            speak = bool(
+                self.athena.settings.get(
+                    "startupGreetingSpeak",
+                    self.athena.settings.get("voiceSpeakStartupGreeting", False),
+                )
+            )
+            greeting = self.athena.startup_greeting(speak=speak)
+            self.chat_panel.append_athena_message(greeting)
+        except Exception as error:
+            self.athena.handle_exception(error, {"module": "gui/main_window.py", "operation": "show_startup_greeting"})
 
     def refresh_lightweight_panels(self):
         for panel in [self.memory_panel, self.world_model_panel, self.agency_panel, self.settings_panel]:

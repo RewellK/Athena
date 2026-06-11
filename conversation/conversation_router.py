@@ -92,10 +92,23 @@ class ConversationRouter:
         }
 
     def _fast_route(self, user_input):
-        if not self.settings or not self.settings.get("useFastConversationPath", True):
+        if not self.settings:
             return None
+        if not self.settings.get("fastPathEnabled", self.settings.get("useFastConversationPath", True)):
+            return None
+        if not self.settings.get("useFastConversationPath", True):
+            return None
+        identity_route = self._fast_identity_route(user_input)
+        if identity_route:
+            return identity_route
+        error_route = self._fast_error_query(user_input)
+        if error_route:
+            return error_route
+        external_route = self._fast_external_tool_missing(user_input)
+        if external_route:
+            return external_route
         memory_query = self._fast_memory_query(user_input)
-        if memory_query and self.settings.get("useFastMemoryQueryPath", True):
+        if memory_query and self.settings.get("fastPathEntityQueries", self.settings.get("useFastMemoryQueryPath", True)):
             return self._fast_route_result(
                 route="world_query",
                 intent="entity_query",
@@ -105,7 +118,7 @@ class ConversationRouter:
                 should_query_world_model=True,
                 source="local_fast_memory_query",
             )
-        conversation_route = self._fast_conversation_route(user_input)
+        conversation_route = self._fast_conversation_route(user_input) if self.settings.get("fastPathGreetings", True) else None
         if conversation_route:
             return self._fast_route_result(
                 route=conversation_route,
@@ -122,6 +135,9 @@ class ConversationRouter:
         target_type="unknown",
         requires_memory=False,
         should_query_world_model=False,
+        requires_tool=False,
+        tool_name=None,
+        structured_request=None,
         source="local_fast_route",
     ):
         return {
@@ -133,15 +149,15 @@ class ConversationRouter:
             "confidence": 0.99,
             "needs_clarification": False,
             "requires_memory": requires_memory,
-            "requires_tool": False,
-            "tool_name": None,
+            "requires_tool": requires_tool,
+            "tool_name": tool_name,
             "should_learn": False,
             "should_use_llm_response": False,
             "should_query_world_model": should_query_world_model,
             "should_query_self_model": route in {"identity", "self_status"},
             "should_use_reasoning": False,
             "should_use_agency": False,
-            "structured_request": {},
+            "structured_request": structured_request or {},
             "relevance": {},
             "original_route": route,
             "source": source,
@@ -329,6 +345,94 @@ class ConversationRouter:
         if set(words) & greetings:
             return "greeting"
         return None
+
+    def _fast_identity_route(self, user_input):
+        words = self._normalized_words(user_input)
+        if not words or len(words) > 8:
+            return None
+        text = " ".join(words)
+        athena_name = str(self.identity.get("name") or "athena").strip().lower()
+        creator = str(self.identity.get("creator") or "").strip()
+        if (
+            text in {"quem e voce", "quem eh voce", f"quem e {athena_name}", f"quem eh {athena_name}"}
+            or "quem e voce" in text
+            or "quem eh voce" in text
+            or f"quem e {athena_name}" in text
+            or f"quem eh {athena_name}" in text
+        ):
+            return self._fast_route_result(
+                route="identity",
+                intent="self_identity",
+                target=self.identity.get("name", "Athena"),
+                target_type="self",
+                structured_request={"operation": "self_identity"},
+                source="local_fast_self_identity",
+            )
+        if text in {"quem sou eu", "quem eu sou"} or "quem sou eu" in text or "quem eu sou" in text:
+            return self._fast_route_result(
+                route="question_about_user",
+                intent="user_identity",
+                target=creator,
+                target_type="user",
+                requires_memory=True,
+                should_query_world_model=True,
+                structured_request={"operation": "user_identity"},
+                source="local_fast_user_identity",
+            )
+        if text in {"quem te criou", "quem criou voce", "quem criou a athena"}:
+            return self._fast_route_result(
+                route="identity",
+                intent="creator_query",
+                target=creator,
+                target_type="user",
+                structured_request={"operation": "creator_query"},
+                source="local_fast_creator_query",
+            )
+        return None
+
+    def _fast_error_query(self, user_input):
+        words = self._normalized_words(user_input)
+        if not words or len(words) > 10:
+            return None
+        text = " ".join(words)
+        if "erro" not in words and "falha" not in words and "error" not in words:
+            return None
+        if "ultimo" in words or "ultima" in words or "aconteceu" in words or text.startswith("qual foi"):
+            return self._fast_route_result(
+                route="error_query",
+                intent="error_query",
+                target="last_error",
+                target_type="world",
+                structured_request={"operation": "last_error"},
+                source="local_fast_error_query",
+            )
+        return None
+
+    def _fast_external_tool_missing(self, user_input):
+        words = self._normalized_words(user_input)
+        if not words or len(words) > 14:
+            return None
+        query_words = {"qual", "quais", "quando", "onde", "como", "quanto", "quantos", "quantas", "que"}
+        if not (set(words) & query_words):
+            return None
+        weather_terms = {"clima", "tempo", "temperatura", "previsao"}
+        news_terms = {"noticia", "noticias", "manchetes"}
+        if set(words) & weather_terms:
+            tool_name = "previsão do clima"
+        elif set(words) & news_terms:
+            tool_name = "notícias"
+        else:
+            return None
+        return self._fast_route_result(
+            route="external_information",
+            intent="external_information",
+            target=tool_name,
+            target_type="tool",
+            requires_tool=True,
+            tool_name=tool_name,
+            structured_request={"operation": "external_tool_missing"},
+            source="local_fast_external_tool_missing",
+        )
 
     def _fast_memory_query(self, user_input):
         words = self._normalized_words(user_input)
