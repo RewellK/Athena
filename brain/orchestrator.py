@@ -165,6 +165,7 @@ class Athena:
         self.pending_knowledge_ingestion = None
         self.pending_plan = None
         self.pending_history = []
+        self.last_unknown_interaction = None
 
     def chat(self, user_input):
         try:
@@ -375,8 +376,7 @@ class Athena:
             return self._handle_question_about_user(intention, user_input, metadata)
 
         if route == "capability":
-            technical = intention.get("intent") == "technical_capability" or self._structured_request(intention).get("operation") == "technical_modules"
-            return self.capability_engine.respond(technical=technical)
+            return self._handle_capability_route(intention)
 
         if route == "technical_capability":
             return self.capability_engine.respond(technical=True)
@@ -419,6 +419,7 @@ class Athena:
             local_conversation = self._try_local_conversation_fallback(user_input)
             if local_conversation:
                 return local_conversation
+            self._remember_unknown_classification(user_input, intention)
             return "Não entendi com segurança o que você quer agora. Pode me explicar de outro jeito?"
 
         return self._delegate(intention_id, intention, user_input)
@@ -675,6 +676,9 @@ Fatos estruturados:
         subsystem = request.get("subsystem")
         operation = request.get("operation") or intention.get("operation")
 
+        if operation == "unknown_recovery":
+            return self._explain_last_unknown()
+
         if subsystem == "voice" or operation == "voice_status":
             try:
                 status = self.voice_engine.status()
@@ -691,6 +695,55 @@ Fatos estruturados:
             return self.git_awareness_engine.respond(git_request)
 
         return self.self_status_engine.respond()
+
+    def _handle_capability_route(self, intention):
+        request = self._structured_request(intention)
+        operation = str(request.get("operation") or intention.get("intent") or "").strip().lower()
+        technical = intention.get("intent") == "technical_capability" or operation in {"technical_modules", "technical_capability"}
+        response = self.capability_engine.respond(technical=technical)
+        if request.get("positive_day_context") and not technical:
+            return f"Que bom que seu dia foi bom, {self.creator_name}. Sobre o que eu posso fazer:\n\n{response}"
+        return response
+
+    def _remember_unknown_classification(self, user_input, intention):
+        self.last_unknown_interaction = {
+            "input": str(user_input or ""),
+            "route": intention.get("route", "unknown") if isinstance(intention, dict) else "unknown",
+            "intent": intention.get("intent", "unknown") if isinstance(intention, dict) else "unknown",
+            "source": intention.get("source", "unknown") if isinstance(intention, dict) else "unknown",
+            "summary": intention.get("summary", "") if isinstance(intention, dict) else "",
+            "confidence": intention.get("confidence", 0.0) if isinstance(intention, dict) else 0.0,
+        }
+
+    def _explain_last_unknown(self):
+        last_unknown = getattr(self, "last_unknown_interaction", None)
+        if not last_unknown:
+            return "Não tenho uma falha de classificação recente registrada. Se eu travar em uma intenção, eu consigo explicar o que ficou ambíguo."
+        previous_input = last_unknown.get("input", "")
+        if self._looks_like_capability_question(previous_input):
+            return (
+                "Eu falhei ao classificar sua intenção anterior. Você estava perguntando sobre minhas capacidades, "
+                "então eu deveria ter respondido com o que consigo fazer."
+            )
+        source = last_unknown.get("source") or "roteador"
+        try:
+            confidence = float(last_unknown.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return (
+            "Eu falhei ao classificar sua intenção anterior com segurança. "
+            f"A mensagem foi: \"{previous_input}\". "
+            f"Minha rota ficou como {last_unknown.get('route', 'unknown')} via {source}, com confiança {confidence:.2f}. "
+            "Eu deveria ter pedido uma reformulação mais específica em vez de repetir o mesmo fallback."
+        )
+
+    def _looks_like_capability_question(self, text):
+        words = set(self._normalize_local_phrase(text).split())
+        capability_terms = {"capacidade", "capacidades", "habilidade", "habilidades", "recursos"}
+        action_terms = {"fazer", "faz", "consegue", "pode", "ajudar", "serve"}
+        subject_terms = {"voce", "vc", "vce", str(self.identity.get("name") or "athena").strip().lower()}
+        query_terms = {"o", "que", "oq", "oque", "qual", "quais", "como"}
+        return bool(words & capability_terms) or bool(words & subject_terms and words & action_terms and words & query_terms)
 
     def _try_local_error_awareness(self, user_input):
         """Minimal operational fallback for error diagnostics when the LLM is offline.

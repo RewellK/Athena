@@ -35,6 +35,8 @@ class ResponsePlanner:
             "creator_query": "identity",
             "user_identity": "question_about_user",
             "entity_query": "world_query",
+            "capability_query": "capability",
+            "capabilities": "capability",
             "technical_capability": "technical_capability",
             "external_information": "external_information",
         }

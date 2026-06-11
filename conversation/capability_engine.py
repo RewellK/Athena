@@ -16,9 +16,11 @@ class CapabilityEngine:
         voice = "voz" if self._voice_enabled() else "voz opcional"
         git = "leitura Git" if self._git_available() else "leitura Git quando houver repositório local"
         return (
-            "Hoje eu consigo conversar, lembrar informações importantes, organizar conhecimento no meu World Model, "
-            "raciocinar com hipóteses, usar fontes de conhecimento, analisar meu próprio código, usar agência controlada, "
-            f"usar {voice} e fazer {git} em modo somente leitura.\n\n"
+            "Eu posso conversar com você, lembrar informações importantes, consultar meu World Model, "
+            "explicar o que sei, mostrar meu status, raciocinar com hipóteses, lidar com ferramentas configuradas "
+            "e ajudar você a evoluir meu próprio projeto. "
+            f"Também consigo usar {voice} e fazer {git} em modo somente leitura.\n\n"
+            "Algumas capacidades ainda dependem de configuração, como clima/notícias em tempo real.\n\n"
             "Se quiser, posso te mostrar isso de forma técnica também."
         )
 

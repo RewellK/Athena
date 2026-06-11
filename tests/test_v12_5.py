@@ -10,6 +10,7 @@ from conversation.conversation_context import ConversationContext
 from conversation.conversation_engine import ConversationEngine
 from conversation.conversation_metrics import ConversationMetrics
 from conversation.conversation_router import ConversationRouter
+from conversation.capability_engine import CapabilityEngine
 from conversation.identity_engine import IdentityEngine
 from llm.provider import LLMResult
 from memory.database import MemoryDB
@@ -351,6 +352,7 @@ def make_athena(tmp_path):
     athena.conversation_router = ConversationRouter(llm, context_builder, logger, identity=identity, settings=settings, tool_registry=tool_registry, relevance_engine=athena.relevance_engine)
     athena.conversation_engine = ConversationEngine(identity, llm, context_builder, health_engine=None, logger=logger, settings=settings)
     athena.identity_engine = IdentityEngine(identity, athena.self_model)
+    athena.capability_engine = CapabilityEngine(settings=settings)
     athena.message_sound_engine = NullSound()
     athena.voice_engine = NullVoice()
     athena.conversation_metrics = ConversationMetrics(path=str(tmp_path / "logs" / "conversation_metrics.jsonl"), logger=logger)
@@ -359,6 +361,7 @@ def make_athena(tmp_path):
     athena.pending_knowledge_ingestion = None
     athena.pending_plan = None
     athena.pending_history = []
+    athena.last_unknown_interaction = None
     return athena
 
 

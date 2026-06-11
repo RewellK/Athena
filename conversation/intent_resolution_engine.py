@@ -17,6 +17,8 @@ class IntentResolutionEngine:
         "user_identity",
         "creator_query",
         "entity_query",
+        "capability_query",
+        "capabilities",
         "capability",
         "technical_capability",
         "self_status",
@@ -104,7 +106,7 @@ Identidade mínima:
 - Usuário/criador principal: {creator}
 
 Intenções permitidas:
-self_identity, user_identity, creator_query, entity_query, capability, technical_capability,
+self_identity, user_identity, creator_query, entity_query, capability_query, capabilities, capability, technical_capability,
 self_status, memory_query, world_query, reasoning, learning, agency, system,
 error_query, external_information, small_talk, greeting, conversation, unknown
 
@@ -133,6 +135,7 @@ Schema obrigatório:
 
 Orientação de decisão:
 - Pergunta sobre Athena: intent=self_identity, target_type=self.
+- Pergunta sobre capacidades, habilidades ou o que Athena pode fazer: intent=capability_query, target_type=self.
 - Pergunta sobre o usuário/criador: intent=user_identity, target_type=user, requires_memory=true.
 - Pergunta sobre entidade/pessoa/objeto/conceito conhecido: intent=entity_query, target_type=entity, requires_world_model=true, requires_memory=true.
 - Informação nova fornecida pelo usuário: intent=learning, should_learn=true.

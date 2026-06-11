@@ -101,12 +101,18 @@ class ConversationRouter:
         identity_route = self._fast_identity_route(user_input)
         if identity_route:
             return identity_route
+        capability_route = self._fast_capability_route(user_input)
+        if capability_route:
+            return capability_route
         error_route = self._fast_error_query(user_input)
         if error_route:
             return error_route
         external_route = self._fast_external_tool_missing(user_input)
         if external_route:
             return external_route
+        unknown_recovery = self._fast_unknown_recovery(user_input)
+        if unknown_recovery:
+            return unknown_recovery
         memory_query = self._fast_memory_query(user_input)
         if memory_query and self.settings.get("fastPathEntityQueries", self.settings.get("useFastMemoryQueryPath", True)):
             return self._fast_route_result(
@@ -346,6 +352,31 @@ class ConversationRouter:
             return "greeting"
         return None
 
+    def _fast_capability_route(self, user_input):
+        words = self._normalized_words(user_input)
+        if not words or len(words) > 18:
+            return None
+        word_set = set(words)
+        capability_terms = {"capacidade", "capacidades", "habilidade", "habilidades", "recursos"}
+        action_terms = {"fazer", "faz", "consegue", "pode", "ajudar", "serve"}
+        subject_terms = {"voce", "vc", "vce", str(self.identity.get("name") or "athena").strip().lower()}
+        query_terms = {"o", "que", "oq", "oque", "qual", "quais", "como"}
+        asks_capability = bool(word_set & capability_terms)
+        asks_action = bool(word_set & subject_terms and word_set & action_terms and word_set & query_terms)
+        if not asks_capability and not asks_action:
+            return None
+        structured_request = {"operation": "capability_query"}
+        if self._has_positive_day_context(words):
+            structured_request["positive_day_context"] = True
+        return self._fast_route_result(
+            route="capability",
+            intent="capability_query",
+            target=self.identity.get("name", "Athena"),
+            target_type="self",
+            structured_request=structured_request,
+            source="local_fast_capability_query",
+        )
+
     def _fast_identity_route(self, user_input):
         words = self._normalized_words(user_input)
         if not words or len(words) > 8:
@@ -408,6 +439,26 @@ class ConversationRouter:
             )
         return None
 
+    def _fast_unknown_recovery(self, user_input):
+        words = self._normalized_words(user_input)
+        if not words or len(words) > 10:
+            return None
+        word_set = set(words)
+        subject_terms = {"voce", "vc", "vce"}
+        question_terms = {"o", "que", "oq", "oque", "qual"}
+        understood_terms = {"entendeu", "entender", "compreendeu", "compreender"}
+        negation_terms = {"nao", "n"}
+        if word_set & subject_terms and word_set & question_terms and word_set & understood_terms and word_set & negation_terms:
+            return self._fast_route_result(
+                route="system",
+                intent="unknown_recovery",
+                target="last_unknown",
+                target_type="world",
+                structured_request={"operation": "unknown_recovery"},
+                source="local_fast_unknown_recovery",
+            )
+        return None
+
     def _fast_external_tool_missing(self, user_input):
         words = self._normalized_words(user_input)
         if not words or len(words) > 14:
@@ -459,6 +510,12 @@ class ConversationRouter:
         if target in reserved:
             return ""
         return target
+
+    def _has_positive_day_context(self, words):
+        word_set = set(words)
+        day_terms = {"dia", "manha", "tarde", "noite"}
+        positive_terms = {"bom", "boa", "otimo", "otima", "legal", "feliz", "excelente", "tranquilo", "tranquila"}
+        return bool(word_set & day_terms and word_set & positive_terms)
 
     def _is_short_conversation(self, user_input):
         words = self._normalized_words(user_input)

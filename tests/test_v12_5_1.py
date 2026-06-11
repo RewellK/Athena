@@ -131,6 +131,53 @@ class AthenaV1251Tests(unittest.TestCase):
                 self.assertEqual(self.athena.last_response_metadata["llm_calls"], 0)
                 self.assertEqual(self.athena.llm_provider.prompts, [])
 
+    def test_capability_queries_use_local_capability_engine(self):
+        cases = [
+            ("oq você pode fazer?", "Eu posso conversar"),
+            ("quais são suas capacidades?", "ferramentas configuradas"),
+        ]
+        for message, expected_text in cases:
+            with self.subTest(message=message):
+                self.athena.llm_provider.reset_calls()
+                response = self.athena.chat(message)
+                self.assertEqual(self.athena.last_response_metadata["route"], "capability")
+                self.assertEqual(self.athena.last_response_metadata["intent"], "capability_query")
+                self.assertIn(expected_text, response)
+                self.assertIn("clima/notícias", response)
+                self.assertEqual(self.athena.last_response_metadata["llm_calls"], 0)
+                self.assertEqual(self.athena.llm_provider.prompts, [])
+
+    def test_positive_day_with_capability_question_keeps_capability_as_main_intent(self):
+        self.athena.llm_provider.reset_calls()
+
+        response = self.athena.chat("Hoje meu dia foi muito bom, oque você pode fazer?")
+
+        self.assertEqual(self.athena.last_response_metadata["route"], "capability")
+        self.assertEqual(self.athena.last_response_metadata["intent"], "capability_query")
+        self.assertIn("Que bom que seu dia foi bom", response)
+        self.assertIn("Eu posso conversar", response)
+        self.assertEqual(self.athena.last_response_metadata["llm_calls"], 0)
+        self.assertEqual(self.athena.llm_provider.prompts, [])
+
+    def test_unknown_recovery_explains_previous_classification_failure(self):
+        self.athena.settings.values["useFastConversationPath"] = False
+        self.athena.settings.values["useLLM"] = False
+        first = self.athena.chat("oq você pode fazer?")
+        self.assertIn("Não entendi com segurança", first)
+        self.assertIsNotNone(self.athena.last_unknown_interaction)
+
+        self.athena.settings.values["useFastConversationPath"] = True
+        self.athena.settings.values["useLLM"] = True
+        self.athena.llm_provider.reset_calls()
+        response = self.athena.chat("oq você não entendeu?")
+
+        self.assertEqual(self.athena.last_response_metadata["route"], "system")
+        self.assertIn("falhei ao classificar", response)
+        self.assertIn("capacidades", response)
+        self.assertNotIn("Pode me explicar de outro jeito?", response)
+        self.assertEqual(self.athena.last_response_metadata["llm_calls"], 0)
+        self.assertEqual(self.athena.llm_provider.prompts, [])
+
     def test_voice_speak_returns_before_provider_finishes(self):
         settings = FakeSettings(
             {
