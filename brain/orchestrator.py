@@ -216,11 +216,18 @@ class Athena:
             "local_fast_path": str(route_result.get("source", "")).startswith("local_"),
             "route_source": route_result.get("source", ""),
             "intent_interpretation_ms": route_result.get("intent_interpretation_ms", 0),
+            "intent_llm_calls": route_result.get("intent_llm_calls", 0),
+            "relevance_llm_calls": route_result.get("relevance_llm_calls", 0),
+            "extraction_llm_calls": 0,
+            "reasoning_llm_calls": 0,
+            "natural_response_llm_calls": 0,
+            "follow_up_llm_calls": 0,
             "relevance_ms": relevance.get("duration_ms", 0),
             "extraction_ms": 0,
             "world_query_ms": 0,
             "response_ms": 0,
             "tts_ms": 0,
+            "tts_duration_ms": 0,
             "relevance_score": relevance.get("relevance_score", 0),
             "emotional_score": relevance.get("emotional_score", 0),
             "relationship_score": relevance.get("relationship_score", 0),
@@ -243,7 +250,9 @@ class Athena:
             response = self._with_pending_reminder(response, had_pending_before, pending_control, metadata)
             return self._finalize_response(response, route_result, started_at, user_input, metadata)
 
+        fallback_calls_before = self._llm_call_count()
         fallback = self.conversation_engine.respond(user_input, route_result, self.conversation_context)
+        self._add_llm_delta(metadata, "natural_response_llm_calls", fallback_calls_before)
         fallback = self._with_pending_reminder(fallback, had_pending_before, pending_control, metadata)
         return self._finalize_response(fallback, route_result, started_at, user_input, metadata)
 
@@ -272,6 +281,12 @@ class Athena:
             "target": "",
             "used_llm": False,
             "llm_calls": 0,
+            "intent_llm_calls": 0,
+            "relevance_llm_calls": 0,
+            "extraction_llm_calls": 0,
+            "reasoning_llm_calls": 0,
+            "natural_response_llm_calls": 0,
+            "follow_up_llm_calls": 0,
             "used_world_model": False,
             "used_reasoning": False,
             "used_agency": False,
@@ -280,6 +295,7 @@ class Athena:
             "local_fast_path": True,
             "route_source": "local_startup_greeting",
             "startup_ms": int((time.perf_counter() - started_at) * 1000),
+            "tts_duration_ms": 0,
         }
         return response
 
@@ -395,11 +411,14 @@ class Athena:
             query_started_at = time.perf_counter()
             response = self._handle_world_query(intention, user_input)
             metadata["world_query_ms"] = int((time.perf_counter() - query_started_at) * 1000)
-            return response or self._natural_response(user_input, intention)
+            return response or self._natural_response(user_input, intention, metadata)
 
         if route == "reasoning":
             metadata["used_reasoning"] = True
-            return self.reasoning_engine.respond(user_input, intention)
+            reasoning_calls_before = self._llm_call_count()
+            response = self.reasoning_engine.respond(user_input, intention)
+            self._add_llm_delta(metadata, "reasoning_llm_calls", reasoning_calls_before)
+            return response
 
         if route == "learning":
             metadata["used_world_model"] = True
@@ -854,14 +873,17 @@ Fatos estruturados:
         metadata = metadata if isinstance(metadata, dict) else {}
         supplemental_context = self._learning_supplemental_context(intention, user_input)
         extraction_started_at = time.perf_counter()
+        extraction_calls_before = self._llm_call_count()
         extraction, decision = self.world_model.propose(user_input, supplemental_context=supplemental_context)
         metadata["extraction_ms"] = int((time.perf_counter() - extraction_started_at) * 1000)
+        self._add_llm_delta(metadata, "extraction_llm_calls", extraction_calls_before)
 
         route_relevance = intention.get("relevance") if isinstance(intention.get("relevance"), dict) else {}
         if self._can_reuse_route_relevance(route_relevance):
             relevance = self._enrich_relevance_from_extraction(route_relevance, extraction)
         else:
             relevance_started_at = time.perf_counter()
+            relevance_calls_before = self._llm_call_count()
             relevance = self.relevance_engine.evaluate(
                 user_message=user_input,
                 resolved_intent=intention,
@@ -873,6 +895,7 @@ Fatos estruturados:
                 self_identity=self.identity,
             )
             relevance["duration_ms"] = int((time.perf_counter() - relevance_started_at) * 1000)
+            self._add_llm_delta(metadata, "relevance_llm_calls", relevance_calls_before)
             relevance = self._merge_relevance(route_relevance, relevance)
 
         plan = self.consolidation_planner.plan(
@@ -884,6 +907,7 @@ Fatos estruturados:
             current_world_model_state=self._world_state_snapshot(),
         )
 
+        follow_up_calls_before = self._llm_call_count()
         follow_up = self.follow_up_question_engine.generate(
             user_input,
             relevance,
@@ -891,6 +915,7 @@ Fatos estruturados:
             resolved_target={"target": intention.get("target"), "target_type": intention.get("target_type")},
             recent_context=self.conversation_context.summary(limit=8),
         )
+        self._add_llm_delta(metadata, "follow_up_llm_calls", follow_up_calls_before)
         if follow_up:
             relevance["should_ask_follow_up"] = True
             relevance["follow_up_question"] = follow_up
@@ -927,7 +952,7 @@ Fatos estruturados:
         elif self._has_extracted_knowledge(extraction):
             self.memory.save_world_extraction(user_input, extraction, {"decision": decision, "saved": False})
 
-        response = self._format_learning_natural(user_input, intention, extraction, decision, saved, relevance, plan, follow_up)
+        response = self._format_learning_natural(user_input, intention, extraction, decision, saved, relevance, plan, follow_up, metadata)
         if plan.get("update_world_model") and decision_name == "confirm":
             response = self._append_world_confirmation_prompt(response, decision, extraction)
         return response
@@ -1053,7 +1078,7 @@ Fatos estruturados:
                 return True
         return False
 
-    def _format_learning_natural(self, user_input, intention, extraction, decision, saved, relevance, plan, follow_up):
+    def _format_learning_natural(self, user_input, intention, extraction, decision, saved, relevance, plan, follow_up, metadata=None):
         payload = {
             "intention": intention,
             "extraction": extraction,
@@ -1065,6 +1090,7 @@ Fatos estruturados:
         }
         if self.llm_provider and self.settings.get("useNaturalResponses", True):
             try:
+                natural_calls_before = self._llm_call_count()
                 prompt = f"""
 Você é o NaturalResponseEngine da Athena.
 Escreva a resposta final ao usuário com base no resultado do Athena Core.
@@ -1083,9 +1109,11 @@ Resultado estruturado do Core:
 {json.dumps(payload, ensure_ascii=False, indent=2)}
 """.strip()
                 result = self.llm_provider.generate(prompt)
+                self._add_llm_delta(metadata, "natural_response_llm_calls", natural_calls_before)
                 if result.available and result.text:
                     return result.text.strip()
             except Exception as error:
+                self._add_llm_delta(metadata, "natural_response_llm_calls", natural_calls_before)
                 self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "format_learning_natural"})
 
         score = self._as_score(relevance.get("relevance_score", relevance.get("importance_score", 0)))
@@ -1461,9 +1489,10 @@ Resultado estruturado do Core:
         )
         return f"{response_text}\n\n{prompt}" if response_text else prompt
 
-    def _natural_response(self, user_input, intention):
+    def _natural_response(self, user_input, intention, metadata=None):
         if self.llm_provider:
             try:
+                natural_calls_before = self._llm_call_count()
                 prompt = f"""
 Você é Athena respondendo de forma natural, curta e fiel ao Athena Core.
 Não invente fatos. Se faltar contexto, peça esclarecimento.
@@ -1478,9 +1507,11 @@ Mensagem do usuário:
 {user_input}
 """.strip()
                 result = self.llm_provider.generate(prompt)
+                self._add_llm_delta(metadata, "natural_response_llm_calls", natural_calls_before)
                 if result.available and result.text:
                     return result.text.strip()
             except Exception as error:
+                self._add_llm_delta(metadata, "natural_response_llm_calls", natural_calls_before)
                 self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "natural_response"})
         return "Minha LLM local não está disponível agora, mas continuo funcional com minha memória interna. Pode me dar mais contexto?"
 
@@ -1593,10 +1624,12 @@ Mensagem do usuário:
         speak_started_at = time.perf_counter()
         spoken = self._speak(response_text)
         metadata["tts_ms"] = int((time.perf_counter() - speak_started_at) * 1000)
+        metadata["tts_duration_ms"] = metadata["tts_ms"]
         metadata["used_voice"] = bool(spoken)
         if spoken:
             try:
                 metadata["tts_ms"] = max(metadata["tts_ms"], int(self.voice_engine.status().get("last_submit_ms", 0)))
+                metadata["tts_duration_ms"] = metadata["tts_ms"]
             except Exception:
                 pass
 
@@ -1629,6 +1662,12 @@ Mensagem do usuário:
         except Exception as error:
             self.handle_exception(error, {"module": "voice/voice_engine.py", "operation": "speak"})
             return False
+
+    def _add_llm_delta(self, metadata, key, calls_before):
+        if metadata is None:
+            return
+        calls_after = self._llm_call_count()
+        metadata[key] = int(metadata.get(key, 0) or 0) + max(0, calls_after - calls_before)
 
     def _llm_call_count(self):
         provider = getattr(self, "llm_provider", None)

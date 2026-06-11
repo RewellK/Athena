@@ -68,6 +68,7 @@ DEFAULT_SETTINGS = {
     "useLLMIntentResolution": True,
     "allowLocalIntentFallback": False,
     "intentResolutionTimeoutSeconds": 8,
+    "useAthenaSemanticLanguage": False,
 }
 
 

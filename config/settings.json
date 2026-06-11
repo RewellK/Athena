@@ -62,5 +62,6 @@
     "naturalResponseForSmallTalk": true,
     "useLLMIntentResolution": true,
     "allowLocalIntentFallback": false,
-    "intentResolutionTimeoutSeconds": 8
+    "intentResolutionTimeoutSeconds": 8,
+    "useAthenaSemanticLanguage": false
 }

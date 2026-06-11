@@ -1,9 +1,38 @@
+import json
+from pathlib import Path
+
 from memory.database import MemoryDB
 from core.settings import Settings
 from error_awareness.error_capture import ErrorCapture
 from core.logger import AthenaLogger
 from git_awareness.git_awareness_engine import GitAwarenessEngine
 from self_code_awareness.self_code_awareness_engine import SelfCodeAwarenessEngine
+
+
+def print_recent_conversation_metrics(path="logs/conversation_metrics.jsonl", limit=10):
+    metrics_path = Path(path)
+    print("\n=== CONVERSATION METRICS V12.6 ===\n")
+    if not metrics_path.exists():
+        print("Nenhuma métrica de conversa encontrada.")
+        return
+    try:
+        lines = metrics_path.read_text(encoding="utf-8").splitlines()[-limit:]
+    except Exception as error:
+        print(f"Não consegui ler métricas recentes: {type(error).__name__}: {error}")
+        return
+    for line in lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            print(f"Métrica inválida: {line[:120]}")
+            continue
+        print(
+            f"{payload.get('timestamp')} | route={payload.get('route')} | "
+            f"duration={payload.get('duration_ms')}ms | llm_calls={payload.get('llm_calls', 0)} | "
+            f"intent={payload.get('intent_llm_calls', 0)} | relevance={payload.get('relevance_llm_calls', 0)} | "
+            f"extraction={payload.get('extraction_llm_calls', 0)} | reasoning={payload.get('reasoning_llm_calls', 0)} | "
+            f"natural={payload.get('natural_response_llm_calls', 0)} | tts={payload.get('tts_duration_ms', payload.get('tts_ms', 0))}ms"
+        )
 
 
 def inspect():
@@ -249,6 +278,8 @@ def inspect():
     else:
         print("Nenhum erro registrado em logs/last_error.json.")
 
+    print_recent_conversation_metrics()
+
     print("\n=== SELF CODE AWARENESS V12 ===\n")
     settings = Settings()
     git_engine = GitAwarenessEngine(settings.get("projectRoot", "."), settings.get("officialRepositoryUrl"))
@@ -257,6 +288,7 @@ def inspect():
 
     print("\n=== GIT READ AWARENESS V12 ===\n")
     print(git_engine.respond({"operation": "summary"}))
+    db.close()
 
 
 if __name__ == "__main__":

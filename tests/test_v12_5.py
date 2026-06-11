@@ -48,6 +48,7 @@ class FakeSettings:
             "pendingConfirmationBlocksConversation": False,
             "pendingConfirmationTtlSeconds": 300,
             "intentResolutionTimeoutSeconds": 8,
+            "useAthenaSemanticLanguage": False,
         }
         self.values.update(values or {})
 

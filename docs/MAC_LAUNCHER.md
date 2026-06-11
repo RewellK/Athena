@@ -20,3 +20,16 @@ instale as dependências no ambiente virtual do projeto e tente novamente.
 
 Por padrão, a voz vem desligada em `config/settings.json` para manter a primeira
 execução rápida e previsível. No macOS, o provider padrão é `macos_say`.
+
+## Reset seguro do banco
+
+O launcher não reseta banco automaticamente. Para recriar `knowledge.db` com
+backup obrigatório, rode manualmente na raiz do projeto:
+
+```bash
+python3 scripts/reset_knowledge_db.py --confirm RESET_KNOWLEDGE_DB
+```
+
+O script cria uma pasta em `backups/`, preserva `knowledge.db`, `knowledge.db-wal`
+e `knowledge.db-shm` quando existirem, recria o banco via bootstrap e orienta a
+reiniciar a GUI.

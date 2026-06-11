@@ -48,10 +48,14 @@ class ConversationRouter:
         if fast_route:
             return fast_route
 
+        llm_calls_before = self._llm_call_count()
         resolution = self.intent_resolution_engine.resolve(user_input, session_context, pending_state)
+        intent_llm_calls = max(0, self._llm_call_count() - llm_calls_before)
         target = self.target_resolution_engine.resolve(resolution)
         if not resolution.get("available", True):
-            return self._unavailable_route(resolution)
+            unavailable = self._unavailable_route(resolution)
+            unavailable["intent_llm_calls"] = intent_llm_calls
+            return unavailable
 
         interpretation = dict(resolution)
         interpretation.update({
@@ -60,7 +64,9 @@ class ConversationRouter:
         })
         plan = self.response_planner.plan(interpretation)
         plan = self._apply_query_precedence(user_input, plan)
+        relevance_calls_before = self._llm_call_count()
         relevance = self._evaluate_relevance(user_input, plan, target, session_context)
+        relevance_llm_calls = max(0, self._llm_call_count() - relevance_calls_before)
         original_route = plan.get("route", "conversation")
         plan = self._apply_relevance(user_input, plan, relevance)
         route = plan.get("route", "conversation")
@@ -89,6 +95,8 @@ class ConversationRouter:
             "original_route": original_route,
             "source": plan.get("source", "conversation_router"),
             "intent_interpretation_ms": resolution.get("duration_ms", 0) if isinstance(resolution, dict) else 0,
+            "intent_llm_calls": intent_llm_calls,
+            "relevance_llm_calls": relevance_llm_calls,
         }
 
     def _fast_route(self, user_input):
@@ -168,6 +176,8 @@ class ConversationRouter:
             "original_route": route,
             "source": source,
             "intent_interpretation_ms": 0,
+            "intent_llm_calls": 0,
+            "relevance_llm_calls": 0,
         }
 
     def _unavailable_route(self, resolution):
@@ -191,6 +201,8 @@ class ConversationRouter:
             "structured_request": {"error": resolution.get("error", "LLM indisponível")},
             "source": "llm_intent_unavailable",
             "intent_interpretation_ms": resolution.get("duration_ms", 0),
+            "intent_llm_calls": 0,
+            "relevance_llm_calls": 0,
         }
 
     def _confidence(self, value, default=0.0):
@@ -472,6 +484,8 @@ class ConversationRouter:
             tool_name = "previsão do clima"
         elif set(words) & news_terms:
             tool_name = "notícias"
+        elif self._current_external_request(words):
+            tool_name = "fonte externa atual"
         else:
             return None
         return self._fast_route_result(
@@ -516,6 +530,27 @@ class ConversationRouter:
         day_terms = {"dia", "manha", "tarde", "noite"}
         positive_terms = {"bom", "boa", "otimo", "otima", "legal", "feliz", "excelente", "tranquilo", "tranquila"}
         return bool(word_set & day_terms and word_set & positive_terms)
+
+    def _current_external_request(self, words):
+        word_set = set(words)
+        current_terms = {"hoje", "agora", "atual", "atuais", "tempo", "real"}
+        price_terms = {"preco", "precos", "valor", "valores", "cotacao", "cotacoes"}
+        event_terms = {"evento", "eventos", "agenda", "acontecimentos"}
+        return bool(word_set & current_terms and (word_set & price_terms or word_set & event_terms))
+
+    def _llm_call_count(self):
+        provider = getattr(self, "llm_provider", None)
+        if not provider:
+            return 0
+        if hasattr(provider, "call_count"):
+            try:
+                return int(provider.call_count)
+            except (TypeError, ValueError):
+                return 0
+        prompts = getattr(provider, "prompts", None)
+        if isinstance(prompts, list):
+            return len(prompts)
+        return 0
 
     def _is_short_conversation(self, user_input):
         words = self._normalized_words(user_input)

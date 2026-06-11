@@ -24,6 +24,7 @@ class ConversationMetrics:
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "input": self._clip(input_text),
             "duration_ms": duration_ms,
+            "total_duration_ms": duration_ms,
         })
         try:
             with self._lock:
