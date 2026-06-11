@@ -24,6 +24,8 @@ class NaturalResponseEngine:
         return next(self._greetings).format(creator=self.identity.get("creator", "Rewell"))
 
     def small_talk(self, user_input="", health_summary=None):
+        if self.settings and self.settings.get("fastLocalSmallTalkResponses", True):
+            return next(self._small_talk)
         if self._should_use_llm():
             prompt = self._compact_prompt(
                 user_input=user_input,

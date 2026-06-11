@@ -44,6 +44,10 @@ class ConversationRouter:
         self.relevance_engine = relevance_engine or RelevanceEngine(llm_provider, self.identity, logger, settings)
 
     def route(self, user_input, session_context=None, pending_state=None):
+        fast_route = self._fast_route(user_input)
+        if fast_route:
+            return fast_route
+
         resolution = self.intent_resolution_engine.resolve(user_input, session_context, pending_state)
         target = self.target_resolution_engine.resolve(resolution)
         if not resolution.get("available", True):
@@ -87,6 +91,63 @@ class ConversationRouter:
             "intent_interpretation_ms": resolution.get("duration_ms", 0) if isinstance(resolution, dict) else 0,
         }
 
+    def _fast_route(self, user_input):
+        if not self.settings or not self.settings.get("useFastConversationPath", True):
+            return None
+        memory_query = self._fast_memory_query(user_input)
+        if memory_query and self.settings.get("useFastMemoryQueryPath", True):
+            return self._fast_route_result(
+                route="world_query",
+                intent="entity_query",
+                target=memory_query,
+                target_type="entity",
+                requires_memory=True,
+                should_query_world_model=True,
+                source="local_fast_memory_query",
+            )
+        conversation_route = self._fast_conversation_route(user_input)
+        if conversation_route:
+            return self._fast_route_result(
+                route=conversation_route,
+                intent=conversation_route,
+                source="local_fast_conversation",
+            )
+        return None
+
+    def _fast_route_result(
+        self,
+        route,
+        intent,
+        target="",
+        target_type="unknown",
+        requires_memory=False,
+        should_query_world_model=False,
+        source="local_fast_route",
+    ):
+        return {
+            "route": route,
+            "intent": intent,
+            "target": target,
+            "target_type": target_type,
+            "summary": route,
+            "confidence": 0.99,
+            "needs_clarification": False,
+            "requires_memory": requires_memory,
+            "requires_tool": False,
+            "tool_name": None,
+            "should_learn": False,
+            "should_use_llm_response": False,
+            "should_query_world_model": should_query_world_model,
+            "should_query_self_model": route in {"identity", "self_status"},
+            "should_use_reasoning": False,
+            "should_use_agency": False,
+            "structured_request": {},
+            "relevance": {},
+            "original_route": route,
+            "source": source,
+            "intent_interpretation_ms": 0,
+        }
+
     def _unavailable_route(self, resolution):
         return {
             "route": "unknown",
@@ -121,7 +182,22 @@ class ConversationRouter:
 
     def _evaluate_relevance(self, user_input, plan, target, session_context):
         route = plan.get("route")
-        if route in {"external_information", "system", "capability", "technical_capability", "self_status", "error_query"}:
+        if route in {
+            "external_information",
+            "system",
+            "capability",
+            "technical_capability",
+            "self_status",
+            "error_query",
+            "world_query",
+            "question_about_user",
+            "memory_query",
+            "learning",
+        }:
+            return {}
+        if self._looks_like_explicit_query(user_input):
+            return {}
+        if route in {"greeting", "small_talk"} and self._is_short_conversation(user_input):
             return {}
         if not self.relevance_engine:
             return {}
@@ -239,3 +315,54 @@ class ConversationRouter:
         }.items():
             normalized = normalized.replace(source, target)
         return " ".join(normalized.split())
+
+    def _fast_conversation_route(self, user_input):
+        words = self._normalized_words(user_input)
+        if not words or len(words) > 10:
+            return None
+        if any(word in {"quem", "qual", "quais", "quando", "onde", "como", "porque", "quanto", "quantos", "quantas"} for word in words):
+            return None
+        greetings = {"oi", "ola", "opa", "eai", "bom", "boa"}
+        small_talk = {"bem", "tranquilo", "tranquila", "tudo"}
+        if set(words) & greetings and set(words) & small_talk:
+            return "small_talk"
+        if set(words) & greetings:
+            return "greeting"
+        return None
+
+    def _fast_memory_query(self, user_input):
+        words = self._normalized_words(user_input)
+        if len(words) < 3 or len(words) > 10:
+            return ""
+        if words[0] == "quem" and words[1] in {"e", "eh"}:
+            return self._target_from_words(words[2:])
+        prefix = ["o", "que", "voce", "sabe", "sobre"]
+        if words[: len(prefix)] == prefix:
+            return self._target_from_words(words[len(prefix):])
+        return ""
+
+    def _target_from_words(self, words):
+        ignored = {"a", "o", "as", "os", "um", "uma", "uns", "umas"}
+        target_words = [word for word in words if word not in ignored]
+        target = " ".join(target_words).strip()
+        reserved = {
+            "voce",
+            "voces",
+            "eu",
+            str(self.identity.get("name") or "athena").strip().lower(),
+            str(self.identity.get("creator") or "").strip().lower(),
+        }
+        if target in reserved:
+            return ""
+        return target
+
+    def _is_short_conversation(self, user_input):
+        words = self._normalized_words(user_input)
+        return bool(words) and len(words) <= 10
+
+    def _normalized_words(self, user_input):
+        normalized = self._normalize_query_text(user_input)
+        chars = []
+        for char in normalized:
+            chars.append(char if char.isalnum() else " ")
+        return "".join(chars).split()

@@ -498,6 +498,11 @@ class Athena:
                 for _id, event_name, event_type, date, description, _created_at in events[:8]
             ],
         }
+        if self.settings.get("fastMemoryResponses", True):
+            fast_response = self._format_entity_fast_natural(name, entity_type, relationships, states, events)
+            if fast_response:
+                return fast_response
+
         if self.llm_provider and self.settings.get("useNaturalResponses", True):
             try:
                 prompt = f"""
@@ -528,6 +533,52 @@ Fatos estruturados:
             state_text = ", ".join(f"{entity} tem {attribute.replace('_', ' ')} {value}" for _id, entity, attribute, value, _source_event, _confidence, _created_at, _updated_at in states[:4])
             lines.append(f"Estados registrados: {state_text}.")
         return " ".join(lines)
+
+    def _format_entity_fast_natural(self, name, entity_type, relationships, states, events):
+        sentences = []
+        creator = str(self.creator_name or "").strip()
+        seen = set()
+        for _id, source, relation, target, _confidence, _created_at in relationships[:12]:
+            sentence = self._relationship_sentence(name, source, relation, target, creator)
+            marker = sentence.lower()
+            if sentence and marker not in seen:
+                seen.add(marker)
+                sentences.append(sentence)
+        if not sentences:
+            if states:
+                state_parts = [
+                    f"{entity} tem {attribute.replace('_', ' ')} {value}"
+                    for _id, entity, attribute, value, _source_event, _confidence, _created_at, _updated_at in states[:3]
+                ]
+                return f"Pelo que sei, {name} está registrado como {entity_type}. Também sei que: {', '.join(state_parts)}."
+            return f"Pelo que sei, {name} está registrado como {entity_type}, mas ainda tenho poucos detalhes."
+        return " ".join(sentences[:4])
+
+    def _relationship_sentence(self, name, source, relation, target, creator):
+        relation = str(relation or "").strip()
+        source = str(source or "").strip()
+        target = str(target or "").strip()
+        if relation == "father_of" and source == name and target == creator:
+            return f"{name} é seu pai."
+        if relation == "girlfriend_of" and source == name and target == creator:
+            return f"{name} é sua namorada."
+        if relation == "future_spouse_of" and source == name and target == creator:
+            return f"Você me contou que pretende se casar com {name}."
+        if relation == "plans_to_marry" and source == creator and target == name:
+            return f"Você me contou que pretende se casar com {name}."
+        if relation == "love_of_life_of" and source == name and target == creator:
+            return f"Você disse que {name} é o amor da sua vida."
+        if relation == "emotionally_important_to" and source == name and target == creator:
+            return f"{name} é alguém emocionalmente importante para você."
+        if relation == "interested_in" and source == name:
+            return f"{name} gosta de {target}."
+        if relation == "owns" and source == name:
+            return f"{name} tem um {target}."
+        if source == name:
+            return f"{name} {relation.replace('_', ' ')} {target}."
+        if target == name:
+            return f"{source} {relation.replace('_', ' ')} {name}."
+        return ""
 
 
     def _handle_external_information_route(self, intention, metadata=None):
@@ -694,17 +745,20 @@ Fatos estruturados:
         extraction, decision = self.world_model.propose(user_input, supplemental_context=supplemental_context)
 
         route_relevance = intention.get("relevance") if isinstance(intention.get("relevance"), dict) else {}
-        relevance = self.relevance_engine.evaluate(
-            user_message=user_input,
-            resolved_intent=intention,
-            resolved_target={"target": intention.get("target"), "target_type": intention.get("target_type")},
-            recent_context=self.conversation_context.summary(limit=8),
-            extracted_knowledge=extraction,
-            known_entities=self._known_entity_context(),
-            current_user_identity={"name": self.creator_name},
-            self_identity=self.identity,
-        )
-        relevance = self._merge_relevance(route_relevance, relevance)
+        if self._can_reuse_route_relevance(route_relevance):
+            relevance = self._enrich_relevance_from_extraction(route_relevance, extraction)
+        else:
+            relevance = self.relevance_engine.evaluate(
+                user_message=user_input,
+                resolved_intent=intention,
+                resolved_target={"target": intention.get("target"), "target_type": intention.get("target_type")},
+                recent_context=self.conversation_context.summary(limit=8),
+                extracted_knowledge=extraction,
+                known_entities=self._known_entity_context(),
+                current_user_identity={"name": self.creator_name},
+                self_identity=self.identity,
+            )
+            relevance = self._merge_relevance(route_relevance, relevance)
 
         plan = self.consolidation_planner.plan(
             resolved_intent=intention,
@@ -754,6 +808,26 @@ Fatos estruturados:
             self.memory.save_world_extraction(user_input, extraction, {"decision": decision, "saved": False})
 
         return self._format_learning_natural(user_input, intention, extraction, decision, saved, relevance, plan, follow_up)
+
+    def _can_reuse_route_relevance(self, relevance):
+        if not isinstance(relevance, dict) or not relevance:
+            return False
+        if relevance.get("memory_priority") in {None, "", "ignore"}:
+            return False
+        return self._as_score(relevance.get("relevance_score", relevance.get("importance_score", 0))) >= 50
+
+    def _enrich_relevance_from_extraction(self, relevance, extraction):
+        enriched = dict(relevance)
+        try:
+            signals = self.relevance_engine.relationship.structured_signals(extraction)
+        except Exception:
+            signals = {}
+        for key in ("relationship_count", "state_count", "event_count"):
+            if key in signals:
+                enriched[key] = max(self._as_score(enriched.get(key, 0)), self._as_score(signals.get(key, 0)))
+        if signals.get("related_entities"):
+            enriched["related_entities"] = self._unique_texts((enriched.get("related_entities") or []) + signals["related_entities"])
+        return enriched
 
     def _apply_relevance_metadata(self, metadata, relevance):
         metadata["relevance_score"] = relevance.get("relevance_score", relevance.get("importance_score", 0))

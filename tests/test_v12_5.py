@@ -33,6 +33,11 @@ class FakeSettings:
             "showRouteMetadata": False,
             "conversationMetricsEnabled": False,
             "voiceEnabled": False,
+            "useFastConversationPath": True,
+            "useFastMemoryQueryPath": True,
+            "fastMemoryResponses": True,
+            "fastLocalSmallTalkResponses": True,
+            "intentResolutionTimeoutSeconds": 8,
         }
         self.values.update(values or {})
 
@@ -72,7 +77,13 @@ class NullErrorReporter:
 
 
 class FakeLLM:
-    def generate(self, prompt):
+    def __init__(self):
+        self.prompts = []
+        self.timeouts = []
+
+    def generate(self, prompt, timeout_seconds=None):
+        self.prompts.append(prompt)
+        self.timeouts.append(timeout_seconds)
         if "módulo de resolução de intenção" in prompt:
             return self._json(self._intent(self._message(prompt)))
         if "RelevanceEngine da Athena" in prompt:
@@ -98,6 +109,13 @@ class FakeLLM:
         if "NaturalResponseEngine da Athena" in prompt and "Resultado estruturado do Core" in prompt:
             return LLMResult(True, self._learning_response(prompt))
         return LLMResult(True, "Entendi.")
+
+    def reset_calls(self):
+        self.prompts = []
+        self.timeouts = []
+
+    def count_prompts(self, marker):
+        return sum(1 for prompt in self.prompts if marker in prompt)
 
     def _json(self, payload):
         return LLMResult(True, json.dumps(payload, ensure_ascii=False))
@@ -372,9 +390,25 @@ class AthenaV125Tests(unittest.TestCase):
         response = self.athena.chat("quem é fernanda?")
         self.assertEqual(self.athena.last_response_metadata["route"], "world_query")
         self.assertIn("Fernanda é sua namorada", response)
-        self.assertIn("pretende se casar com ela", response)
+        self.assertIn("pretende se casar", response)
         self.assertNotIn("Vou guardar", response)
         self.assertNotIn("Você conhece Fernanda?", response)
+
+    def test_fast_paths_skip_llm_for_simple_greeting_and_entity_query(self):
+        self.athena.chat("A Fernanda é minha namorada, eu amo ela, e vou me casar com ela.")
+
+        self.athena.llm_provider.reset_calls()
+        response = self.athena.chat("Olá Athena, bom dia, tudo bem?")
+        self.assertEqual(self.athena.last_response_metadata["route"], "small_talk")
+        self.assertIn("Estou", response)
+        self.assertEqual(self.athena.llm_provider.prompts, [])
+
+        self.athena.llm_provider.reset_calls()
+        response = self.athena.chat("quem é fernanda?")
+        self.assertEqual(self.athena.last_response_metadata["route"], "world_query")
+        self.assertIn("Fernanda é sua namorada", response)
+        self.assertIn("pretende se casar", response)
+        self.assertEqual(self.athena.llm_provider.prompts, [])
 
     def test_v12_5_acceptance_flow(self):
         response = self.athena.chat("Meu pai é o Francisco.")
