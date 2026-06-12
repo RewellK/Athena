@@ -160,6 +160,13 @@ class SourceRegistry:
             self._save()
         return record.to_dict()
 
+    def upsert(self, source):
+        record = source if isinstance(source, SourceRecord) else SourceRecord.from_dict(source)
+        with self._lock:
+            self._sources[record.source_id] = record
+            self._save()
+        return record.to_dict()
+
     def update_status(self, source_id, status, validation_status=None):
         status = _safe_status(status)
         with self._lock:

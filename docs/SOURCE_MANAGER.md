@@ -21,6 +21,18 @@ Quando o usuário pede informação externa:
 7. A fonte continua desativada.
 8. Ela não pode gerar `EvidenceRecord` até validação passar e nova habilitação humana.
 
+## Clima V12.8.1
+
+`weather.open_meteo` é a primeira fonte externa real preparada.
+
+Quando `defaultWeatherSource` está configurado como `weather.open_meteo`, o `SourceManager` registra Open-Meteo como fonte de clima `enabled` e `validation_status=passed`.
+
+Mesmo assim, Athena só cria job de clima quando existe localização com latitude/longitude em `weatherDefaultLocation`.
+
+Sem localização, ela responde honestamente que precisa de uma localização padrão ou geocoder habilitado.
+
+Com localização, o fluxo cria job, consulta o conector e exige `EvidenceRecord`.
+
 ## Domínios iniciais
 
 - `weather`
@@ -70,11 +82,11 @@ Resultado comum:
 
 Quando não há fonte, a resposta é local e rápida.
 
-Quando houver fonte validada no futuro, `AsyncExternalResearchWorker` permitirá criar job e responder imediatamente:
+Quando houver fonte validada, `AsyncExternalResearchWorker` permite criar job e responder imediatamente:
 
 “Vou pesquisar clima em uma fonte configurada, já te respondo.”
 
-Nesta fase, o worker existe como fila local com `process_pending_once()`, sem thread complexa.
+Na V12.8.1, clima pode ser processado inline quando `externalResearchProcessInline=true`, porque a GUI ainda não envia segunda resposta assíncrona automaticamente.
 
 ## Segurança
 

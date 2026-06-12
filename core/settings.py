@@ -78,8 +78,11 @@ DEFAULT_SETTINGS = {
     "externalResearchTimeoutSeconds": 15,
     "externalResearchSayBeforeResearch": True,
     "externalResearchPreResearchMessage": "Vou pesquisar isso, já te respondo.",
-    "defaultWeatherSource": None,
+    "defaultWeatherSource": "weather.open_meteo",
     "defaultNewsSource": None,
+    "weatherForecastTtlSeconds": 3600,
+    "openMeteoForecastUrl": "https://api.open-meteo.com/v1/forecast",
+    "externalResearchProcessInline": True,
     "weatherDefaultLocation": {
         "city": "",
         "state": "",

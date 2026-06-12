@@ -6,8 +6,15 @@ from sources.external_research_worker import AsyncExternalResearchWorker
 
 
 class MockWeatherConnector:
-    def fetch(self, query, timeout_seconds=None):
-        return {"query": query, "summary": "tempo mockado", "temperature_c": 22}
+    def fetch(self, query, timeout_seconds=None, request=None, source=None):
+        location = (request or {}).get("location") or {}
+        return {
+            "query": query,
+            "summary": "tempo mockado",
+            "temperature_c": 22,
+            "location_name": location.get("name", ""),
+            "forecast_date": "2026-06-12",
+        }
 
 
 class ExternalResearchWorkerTests(unittest.TestCase):
@@ -31,7 +38,12 @@ class ExternalResearchWorkerTests(unittest.TestCase):
         )
 
         started_at = time.perf_counter()
-        job = worker.enqueue("weather", "previsão do clima amanhã", source)
+        job = worker.enqueue(
+            "weather",
+            "previsão do clima amanhã",
+            source,
+            request={"location": {"name": "Embu das Artes, SP, Brasil"}},
+        )
         enqueue_ms = int((time.perf_counter() - started_at) * 1000)
 
         self.assertEqual(job["status"], "pending")
@@ -42,7 +54,9 @@ class ExternalResearchWorkerTests(unittest.TestCase):
 
         self.assertEqual(processed["status"], "completed")
         self.assertEqual(processed["result"]["summary"], "tempo mockado")
+        self.assertEqual(processed["result"]["location_name"], "Embu das Artes, SP, Brasil")
         self.assertEqual(processed["evidence"]["source_id"], "weather.mock")
+        self.assertEqual(processed["evidence"]["forecast_date"], "2026-06-12")
         self.assertEqual(worker.pending_count(), 0)
 
     def test_worker_failure_does_not_invent_result(self):

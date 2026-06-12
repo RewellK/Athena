@@ -37,10 +37,16 @@ Campos principais:
 - `query`
 - `fetched_at`
 - `valid_until`
+- `freshness_ttl_seconds`
 - `confidence`
 - `raw_summary`
+- `location`
+- `forecast_date`
+- `result_summary`
 - `url`
 - `license_or_notes`
+
+Na V12.8.1, respostas de clima da Open-Meteo preenchem `location`, `forecast_date` e `result_summary`.
 
 ## Fonte candidata
 
@@ -65,3 +71,5 @@ Exemplos:
 - documentação: TTL longo.
 
 Evidência vencida não deve ser apresentada como atual.
+
+Para clima, o TTL configurado é `weatherForecastTtlSeconds`, por padrão 3600 segundos.

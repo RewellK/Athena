@@ -10,6 +10,7 @@ class ExternalResearchJob:
     query: str
     source_id: str
     user_message: str = ""
+    request: dict = field(default_factory=dict)
     status: str = "pending"
     job_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -33,13 +34,14 @@ class AsyncExternalResearchWorker:
         self.logger = logger
         self.jobs = []
 
-    def enqueue(self, domain, query, source):
+    def enqueue(self, domain, query, source, request=None):
         source = dict(source or {})
         job = ExternalResearchJob(
             domain=domain,
             query=query,
             source_id=source.get("source_id", ""),
             user_message=query,
+            request=dict(request or {}),
         )
         job.source = source
         self.jobs.append(job)
@@ -60,7 +62,15 @@ class AsyncExternalResearchWorker:
             connector = self.connectors.get(job.source.get("connector_type")) or self.connectors.get(job.source_id)
             if not connector:
                 raise RuntimeError("Nenhum conector habilitado para essa fonte.")
-            raw_result = connector.fetch(job.query, timeout_seconds=self.timeout_seconds)
+            try:
+                raw_result = connector.fetch(
+                    job.query,
+                    timeout_seconds=self.timeout_seconds,
+                    request=job.request,
+                    source=job.source,
+                )
+            except TypeError:
+                raw_result = connector.fetch(job.query, timeout_seconds=self.timeout_seconds)
             if time.perf_counter() - started_at > self.timeout_seconds:
                 raise TimeoutError("Consulta excedeu o tempo limite.")
             job.result = raw_result or {}

@@ -161,6 +161,43 @@ class ReflectionEngineTests(unittest.TestCase):
 
         self.assertIn("external_answer_without_validated_source", self.issue_types(events))
 
+    def test_weather_source_issues_are_detected(self):
+        missing_location = self.engine.analyze_turn(
+            "qual a previsão do clima amanhã?",
+            "Para consultar clima, preciso de uma localização padrão.",
+            metadata={
+                "route": "external_information",
+                "external_domain": "weather",
+                "source_status": "missing_location",
+            },
+        )
+        self.assertIn("weather_missing_location", self.issue_types(missing_location))
+
+        source_failure = self.engine.analyze_turn(
+            "qual a previsão do clima amanhã?",
+            "Tentei consultar a fonte de clima, mas a consulta falhou. Prefiro não inventar.",
+            metadata={
+                "route": "external_information",
+                "external_domain": "weather",
+                "source_status": "source_failure",
+                "external_research_job_status": "failed",
+            },
+        )
+        self.assertIn("weather_source_failure", self.issue_types(source_failure))
+
+        without_evidence = self.engine.analyze_turn(
+            "qual a previsão do clima amanhã?",
+            "Segundo a fonte Open-Meteo, amanhã terá chuva fraca.",
+            metadata={
+                "route": "external_information",
+                "external_domain": "weather",
+                "source_status": "completed",
+                "source_id": "weather.open_meteo",
+                "evidence_id": "",
+            },
+        )
+        self.assertIn("weather_answer_without_evidence", self.issue_types(without_evidence))
+
     def test_local_report_uses_stored_hypotheses_and_does_not_call_llm(self):
         self.engine.observe_turn(
             "quem é Fernanda?",

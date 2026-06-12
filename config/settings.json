@@ -73,8 +73,11 @@
     "externalResearchTimeoutSeconds": 15,
     "externalResearchSayBeforeResearch": true,
     "externalResearchPreResearchMessage": "Vou pesquisar isso, já te respondo.",
-    "defaultWeatherSource": null,
+    "defaultWeatherSource": "weather.open_meteo",
     "defaultNewsSource": null,
+    "weatherForecastTtlSeconds": 3600,
+    "openMeteoForecastUrl": "https://api.open-meteo.com/v1/forecast",
+    "externalResearchProcessInline": true,
     "weatherDefaultLocation": {
         "city": "",
         "state": "",

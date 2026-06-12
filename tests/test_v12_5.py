@@ -58,6 +58,17 @@ class FakeSettings:
             "evidenceStorePath": "",
             "externalResearchAsyncEnabled": True,
             "externalResearchTimeoutSeconds": 15,
+            "externalResearchProcessInline": True,
+            "defaultWeatherSource": "weather.open_meteo",
+            "weatherForecastTtlSeconds": 3600,
+            "openMeteoForecastUrl": "https://api.open-meteo.com/v1/forecast",
+            "weatherDefaultLocation": {
+                "city": "",
+                "state": "",
+                "country": "",
+                "latitude": None,
+                "longitude": None,
+            },
             "useAthenaSemanticLanguage": False,
         }
         self.values.update(values or {})

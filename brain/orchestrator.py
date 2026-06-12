@@ -698,8 +698,12 @@ Fatos estruturados:
                 metadata["source_status"] = result.get("status")
                 metadata["source_manager_ms"] = result.get("duration_ms", 0)
                 metadata["source_available"] = bool(result.get("source"))
-                metadata["tool_available"] = result.get("status") == "job_created"
-                metadata["evidence_id"] = (result.get("job") or {}).get("evidence_id")
+                metadata["tool_available"] = result.get("status") in {"job_created", "completed"}
+                metadata["used_source"] = result.get("status") == "completed"
+                metadata["source_id"] = (result.get("source") or {}).get("source_id")
+                evidence = (result.get("job") or {}).get("evidence") or {}
+                metadata["evidence_id"] = evidence.get("evidence_id")
+                metadata["evidence_valid_until"] = evidence.get("valid_until")
                 if result.get("proposal"):
                     proposal = result["proposal"]
                     metadata["source_proposal"] = proposal.get("name")
@@ -711,6 +715,7 @@ Fatos estruturados:
                     )
                 if result.get("job"):
                     metadata["external_research_job_id"] = result["job"].get("job_id")
+                    metadata["external_research_job_status"] = result["job"].get("status")
                     metadata["async_jobs_pending"] = source_manager.worker.pending_count()
                     metadata["reflection_queue_size"] = metadata.get("reflection_queue_size", 0)
                 return result.get("response")

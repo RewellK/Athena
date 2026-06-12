@@ -21,6 +21,11 @@ class EvidenceRecord:
     raw_summary: dict = field(default_factory=dict)
     url: str = ""
     license_or_notes: str = ""
+    freshness_ttl_seconds: int = 0
+    trust: str = ""
+    location: str = ""
+    forecast_date: str = ""
+    result_summary: str = ""
     evidence_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     evidence_type: str = "external_source"
 
@@ -48,6 +53,7 @@ class EvidenceEngine:
         if not self.can_create_trusted_evidence(source):
             raise ValueError("Fonte precisa estar enabled, validada e confiável antes de gerar EvidenceRecord.")
         fetched_at = datetime.now().isoformat(timespec="seconds")
+        ttl = self.freshness_engine.ttl_for(source.get("domain", "general_web"), source)
         record = EvidenceRecord(
             source_id=source.get("source_id", ""),
             source_name=source.get("name", ""),
@@ -59,6 +65,11 @@ class EvidenceEngine:
             raw_summary=dict(raw_summary or {}),
             url=url if url is not None else source.get("url", ""),
             license_or_notes=notes,
+            freshness_ttl_seconds=ttl,
+            trust=source.get("trust_level", ""),
+            location=str((raw_summary or {}).get("location_name") or ""),
+            forecast_date=str((raw_summary or {}).get("forecast_date") or ""),
+            result_summary=str((raw_summary or {}).get("summary") or ""),
         )
         with self._lock:
             self._records.append(record.to_dict())

@@ -40,6 +40,18 @@ Quando houver fonte habilitada e conector validado:
 4. `EvidenceEngine` gera evidência.
 5. GUI futura pode exibir resultado final quando o job completar.
 
+## Clima V12.8.1
+
+O worker agora recebe `request` no job.
+
+Para clima, o request inclui:
+
+- `date_mode`: `today` ou `tomorrow`;
+- `language`: `pt-BR`;
+- `location`: nome, latitude e longitude.
+
+`WeatherOpenMeteoConnector` usa esse request para buscar e normalizar a previsão.
+
 ## Limitação atual
 
 A GUI atual ainda não envia segunda mensagem assíncrona automaticamente.
@@ -52,4 +64,4 @@ Por isso a V12.8 entrega:
 - testes com conector mock;
 - documentação do fluxo assíncrono.
 
-Não há consulta real de internet nesta fase.
+Na V12.8.1, se `externalResearchProcessInline=true`, clima é processado na mesma chamada para retornar a evidência logo quando a consulta for rápida. Os testes continuam usando mock HTTP.

@@ -4,9 +4,48 @@ import unittest
 from pathlib import Path
 
 from sources.source_discovery_engine import SourceDiscoveryEngine
+from sources.external_research_worker import AsyncExternalResearchWorker
+from sources.evidence_engine import EvidenceEngine
 from sources.source_manager import SourceManager
 from sources.source_registry import SourceRegistry
 from tests.test_v12_5 import make_athena
+
+
+class LocalSettings:
+    def __init__(self, values=None):
+        self.values = {
+            "defaultWeatherSource": "weather.open_meteo",
+            "externalResearchTimeoutSeconds": 3,
+            "externalResearchProcessInline": True,
+            "weatherForecastTtlSeconds": 3600,
+            "weatherDefaultLocation": {
+                "city": "",
+                "state": "",
+                "country": "",
+                "latitude": None,
+                "longitude": None,
+            },
+        }
+        self.values.update(values or {})
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+
+class MockWeatherConnector:
+    def fetch(self, query, timeout_seconds=None, request=None, source=None):
+        return {
+            "source_id": "weather.open_meteo",
+            "location_name": request["location"]["name"],
+            "forecast_date": "2026-06-12",
+            "summary": "previsão de chuva fraca, mínima de 16°C e máxima de 25°C.",
+            "temperature_min": 16,
+            "temperature_max": 25,
+            "precipitation_probability": 70,
+            "weather_code": 61,
+            "raw": {"mock": True},
+            "endpoint": "https://api.open-meteo.com/v1/forecast",
+        }
 
 
 class SourceManagerTests(unittest.TestCase):
@@ -88,6 +127,62 @@ class SourceManagerTests(unittest.TestCase):
             self.assertIn("Não sei consultar notícias ainda", response)
             self.assertNotIn("manchete:", response.lower())
             self.assertEqual(metadata["llm_calls"], 0)
+        finally:
+            athena.memory.close()
+
+    def test_weather_source_without_location_asks_for_location(self):
+        manager = SourceManager(settings=LocalSettings(), registry=SourceRegistry(path=self.registry_path))
+
+        result = manager.handle_external_request("Qual a previsão do clima amanhã?")
+
+        self.assertEqual(result["status"], "missing_location")
+        self.assertEqual(result["domain"], "weather")
+        self.assertIn("localização padrão", result["response"])
+        self.assertNotIn("Vou pesquisar", result["response"])
+
+    def test_weather_source_with_location_creates_evidence_inline(self):
+        settings = LocalSettings({
+            "weatherDefaultLocation": {
+                "city": "Embu das Artes",
+                "state": "SP",
+                "country": "Brasil",
+                "latitude": -23.6489,
+                "longitude": -46.8522,
+            }
+        })
+        evidence = EvidenceEngine()
+        worker = AsyncExternalResearchWorker(
+            evidence_engine=evidence,
+            connectors={"weather_open_meteo": MockWeatherConnector()},
+            timeout_seconds=3,
+        )
+        manager = SourceManager(settings=settings, registry=SourceRegistry(path=self.registry_path), evidence_engine=evidence, worker=worker)
+
+        result = manager.handle_external_request("Qual a previsão do clima amanhã?")
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["domain"], "weather")
+        self.assertIn("Vou pesquisar o clima", result["response"])
+        self.assertIn("Open-Meteo", result["response"])
+        self.assertEqual(result["job"]["status"], "completed")
+        self.assertEqual(result["job"]["evidence"]["source_id"], "weather.open_meteo")
+        self.assertTrue(result["job"]["evidence"]["evidence_id"])
+        self.assertEqual(result["job"]["evidence"]["location"], "Embu das Artes, SP, Brasil")
+        self.assertEqual(result["job"]["evidence"]["forecast_date"], "2026-06-12")
+
+    def test_athena_weather_without_location_does_not_call_llm_or_invent(self):
+        athena = make_athena(Path(self.tmp.name))
+        try:
+            response = athena.chat("Qual a previsão do clima amanhã?")
+            metadata = athena.last_response_metadata
+
+            self.assertEqual(metadata["route"], "external_information")
+            self.assertEqual(metadata["external_domain"], "weather")
+            self.assertEqual(metadata["source_status"], "missing_location")
+            self.assertIn("localização padrão", response)
+            self.assertNotIn("Vai chover", response)
+            self.assertEqual(metadata["llm_calls"], 0)
+            self.assertFalse(metadata.get("used_source"))
         finally:
             athena.memory.close()
 

@@ -104,6 +104,7 @@ Evidências:
             self._detect_llm_overuse,
             self._detect_tool_hallucination,
             self._detect_external_answer_without_validated_source,
+            self._detect_weather_source_issues,
             self._detect_pending_confirmation_block,
             self._detect_slow_known_recall,
         ):
@@ -382,6 +383,56 @@ Evidências:
                 "Resposta factual externa deve conter evidence_id ou recusar a resposta de forma honesta."
             ],
         )
+
+    def _detect_weather_source_issues(self, user_message, athena_response, metadata):
+        if self._route(metadata) != "external_information":
+            return None
+        if metadata.get("external_domain") != "weather":
+            return None
+        status = metadata.get("source_status")
+        if status == "missing_location":
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="weather_missing_location",
+                severity="low",
+                suspected_module="SourceManager/WeatherLocation",
+                explanation="A consulta de clima foi reconhecida, mas falta localização configurada.",
+                suggestion="Solicitar cidade/geocoding ou configurar latitude/longitude padrão antes de consultar clima.",
+                suggested_tests=[
+                    "Pergunta de clima sem localização deve pedir localização e não criar job externo."
+                ],
+            )
+        if status == "source_failure" or metadata.get("external_research_job_status") == "failed":
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="weather_source_failure",
+                severity="medium",
+                suspected_module="WeatherOpenMeteoConnector/ExternalResearchWorker",
+                explanation="A fonte de clima falhou e a Athena precisou recusar a resposta factual.",
+                suggestion="Registrar erro do job e manter fallback honesto sem inventar previsão.",
+                suggested_tests=[
+                    "Falha do conector de clima deve responder sem previsão inventada e sem EvidenceRecord."
+                ],
+            )
+        if status == "completed" and not metadata.get("evidence_id"):
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="weather_answer_without_evidence",
+                severity="high",
+                suspected_module="EvidenceEngine",
+                explanation="Consulta de clima concluída sem evidence_id no metadata.",
+                suggestion="Exigir EvidenceRecord antes de apresentar previsão climática factual.",
+                suggested_tests=[
+                    "Resposta climática factual deve incluir evidence_id e source_id."
+                ],
+            )
+        return None
 
     def _detect_pending_confirmation_block(self, user_message, athena_response, metadata):
         pending = metadata.get("pending_confirmation") or metadata.get("pending_before")
