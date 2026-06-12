@@ -28,7 +28,7 @@ class CognitiveControlEngine:
         self.identity = identity or {}
         self.settings = settings
 
-    def classify(self, user_input, pending_state=None):
+    def classify(self, user_input, pending_state=None, session_context=None):
         words = self._words(user_input)
         if not words:
             return None
@@ -48,7 +48,7 @@ class CognitiveControlEngine:
             self._conversation_route,
             self._learning_candidate,
         ):
-            route = resolver(user_input, words)
+            route = resolver(user_input, words, session_context)
             if route:
                 return route
         return None
@@ -147,7 +147,7 @@ class CognitiveControlEngine:
             )
         return None
 
-    def _unknown_recovery(self, _user_input, words):
+    def _unknown_recovery(self, _user_input, words, _session_context=None):
         if len(words) > 12:
             return None
         word_set = set(words)
@@ -167,7 +167,7 @@ class CognitiveControlEngine:
             )
         return None
 
-    def _identity_route(self, _user_input, words):
+    def _identity_route(self, _user_input, words, _session_context=None):
         if len(words) > 12:
             return None
         text = " ".join(words)
@@ -197,17 +197,18 @@ class CognitiveControlEngine:
             )
 
         if "quem e voce" in text or "quem eh voce" in text or f"quem e {athena_name}" in text or f"quem eh {athena_name}" in text:
+            operation = "relationship_to_user" if ("pra mim" in text or "para mim" in text) else "self_identity"
             return self._route_result(
                 route="identity",
                 intent="self_identity",
                 target=self.identity.get("name", "Athena"),
                 target_type="self",
-                structured_request={"operation": "self_identity"},
+                structured_request={"operation": operation},
                 source="local_cognitive_self_identity",
             )
         return None
 
-    def _capability_route(self, _user_input, words):
+    def _capability_route(self, _user_input, words, _session_context=None):
         if len(words) > 28:
             return None
         word_set = set(words)
@@ -222,6 +223,8 @@ class CognitiveControlEngine:
         structured_request = {"operation": "capability_query"}
         if self._has_positive_day_context(words):
             structured_request["positive_day_context"] = True
+        if "nao" in word_set and (word_set & {"consegue", "pode", "faz", "fazer"} or "ainda" in word_set):
+            structured_request["limitations_query"] = True
         return self._route_result(
             route="capability",
             intent="capability_query",
@@ -231,7 +234,7 @@ class CognitiveControlEngine:
             source="local_cognitive_capability_query",
         )
 
-    def _error_query(self, _user_input, words):
+    def _error_query(self, _user_input, words, _session_context=None):
         if len(words) > 12:
             return None
         word_set = set(words)
@@ -248,7 +251,7 @@ class CognitiveControlEngine:
             )
         return None
 
-    def _external_tool_missing(self, _user_input, words):
+    def _external_tool_missing(self, _user_input, words, _session_context=None):
         if len(words) > 20:
             return None
         if not self._looks_like_question(words):
@@ -269,7 +272,7 @@ class CognitiveControlEngine:
             source="local_cognitive_external_tool_missing",
         )
 
-    def _teach_intent(self, _user_input, words):
+    def _teach_intent(self, _user_input, words, _session_context=None):
         if len(words) > 18:
             return None
         word_set = set(words)
@@ -286,14 +289,16 @@ class CognitiveControlEngine:
             )
         return None
 
-    def _entity_query(self, _user_input, words):
-        if len(words) > 28:
+    def _entity_query(self, _user_input, words, session_context=None):
+        if len(words) > 34:
             return None
-        if not self._looks_like_question(words):
-            return None
-        target = self._extract_entity_target(words)
+        target = self._extract_entity_target(words, session_context=session_context)
         if not target:
             return None
+        operation = "user_relation_query" if self._is_user_relation_target(target) else "entity_query"
+        structured_request = {"operation": operation}
+        if self._wants_technical_output(words):
+            structured_request["mode"] = "technical"
         return self._route_result(
             route="world_query",
             intent="entity_query",
@@ -301,14 +306,15 @@ class CognitiveControlEngine:
             target_type="entity",
             requires_memory=True,
             should_query_world_model=True,
+            structured_request=structured_request,
             source="local_cognitive_entity_query",
         )
 
-    def _learning_candidate(self, user_input, words):
+    def _learning_candidate(self, user_input, words, session_context=None):
         if len(words) > 32 or self._looks_like_question(words):
             return None
         if self._looks_like_copula_assertion(words) or self._looks_like_preference_assertion(words):
-            target, target_type = self._learning_target(user_input, words)
+            target, target_type = self._learning_target(user_input, words, session_context=session_context)
             return self._route_result(
                 route="learning",
                 intent="learning_candidate",
@@ -322,10 +328,19 @@ class CognitiveControlEngine:
             )
         return None
 
-    def _conversation_route(self, _user_input, words):
+    def _conversation_route(self, _user_input, words, _session_context=None):
         if len(words) > 12 or self._looks_like_question(words):
             return None
+        text = " ".join(words)
         word_set = set(words)
+        acknowledgements = {"sim", "ok", "okay", "claro", "beleza", "certo", "perfeito", "entendi"}
+        if text in acknowledgements:
+            return self._route_result(
+                route="conversation",
+                intent="conversation",
+                structured_request={"operation": "acknowledgement"},
+                source="local_cognitive_acknowledgement",
+            )
         greetings = {"oi", "ola", "opa", "eai", "bom", "boa"}
         small_talk = {"bem", "tranquilo", "tranquila", "tudo", "sim"}
         if word_set & greetings and word_set & small_talk:
@@ -342,15 +357,25 @@ class CognitiveControlEngine:
             )
         return None
 
-    def _extract_entity_target(self, words):
+    def _extract_entity_target(self, words, session_context=None):
         for index in range(len(words) - 2):
             if words[index] == "quem" and words[index + 1] in {"e", "eh"}:
-                return self._target_from_words(words[index + 2 :])
+                return self._resolve_contextual_target(self._target_from_words(words[index + 2 :]), session_context)
 
-        prefix = ["o", "que", "voce", "sabe", "sobre"]
-        for index in range(len(words) - len(prefix)):
-            if words[index : index + len(prefix)] == prefix:
-                return self._target_from_words(words[index + len(prefix) :])
+        for index in range(len(words) - 3):
+            if words[index] in {"sabe", "sabia"} and words[index + 1] in {"quem", "que"} and words[index + 2] in {"e", "eh"}:
+                return self._resolve_contextual_target(self._target_from_words(words[index + 3 :]), session_context)
+
+        for index, word in enumerate(words):
+            if word == "sobre" and index + 1 < len(words):
+                return self._resolve_contextual_target(self._target_from_words(words[index + 1 :]), session_context)
+
+        for index in range(len(words) - 2):
+            if words[index] in {"fala", "fale"} and words[index + 1] in {"dele", "dela", "nele", "nela"}:
+                return self._resolve_contextual_target(words[index + 1], session_context)
+
+        if words[:2] in (["me", "fala"], ["me", "fale"]) and len(words) >= 3:
+            return self._resolve_contextual_target(self._target_from_words(words[2:]), session_context)
         return ""
 
     def _target_from_words(self, words):
@@ -375,10 +400,14 @@ class CognitiveControlEngine:
             return ""
         return self._display_target(target)
 
-    def _learning_target(self, user_input, words):
+    def _learning_target(self, user_input, words, session_context=None):
         self_terms = {"voce", "vc", "vce", self._identity_word("name", "athena")}
         if set(words) & self_terms:
             return self.identity.get("name", "Athena"), "self"
+        if words and words[0] in {"ele", "ela"}:
+            resolved = self._resolve_contextual_target(words[0], session_context)
+            if resolved:
+                return resolved, "entity"
 
         for copula in ("e", "eh"):
             if copula in words:
@@ -407,6 +436,8 @@ class CognitiveControlEngine:
     def _looks_like_preference_assertion(self, words):
         if len(words) < 4:
             return False
+        if words[0] == "eu" and "gosto" in words:
+            return True
         return words[:3] == ["eu", "gosto", "de"] or (len(words) >= 4 and words[1:3] == ["gosta", "de"])
 
     def _looks_like_question(self, words):
@@ -414,7 +445,35 @@ class CognitiveControlEngine:
             return False
         if words[0] in self.QUESTION_OPENERS:
             return True
-        return any(words[index] == "quem" and index + 1 < len(words) and words[index + 1] in {"e", "eh"} for index in range(len(words)))
+        if any(words[index] == "quem" and index + 1 < len(words) and words[index + 1] in {"e", "eh"} for index in range(len(words))):
+            return True
+        return self._looks_like_entity_information_request(words)
+
+    def _looks_like_entity_information_request(self, words):
+        word_set = set(words)
+        if "sobre" in word_set and (word_set & {"sabe", "saber", "fala", "fale", "falar", "conte", "contar"}):
+            return True
+        if words[:2] in (["me", "fala"], ["me", "fale"]) and len(words) >= 3:
+            return True
+        return False
+
+    def _resolve_contextual_target(self, target, session_context):
+        target = str(target or "").strip()
+        if not target:
+            return ""
+        resolver = getattr(session_context, "resolve_entity_reference", None)
+        if callable(resolver):
+            resolved = resolver(target)
+            if resolved:
+                return resolved
+        return target
+
+    def _is_user_relation_target(self, target):
+        normalized = self._normalize(target)
+        return normalized in {"meu pai", "minha mae", "meus pais", "minha familia"}
+
+    def _wants_technical_output(self, words):
+        return bool(set(words) & {"tecnico", "tecnica", "tecnicamente", "debug", "estruturado", "estruturada", "relacoes"})
 
     def _has_positive_day_context(self, words):
         word_set = set(words)

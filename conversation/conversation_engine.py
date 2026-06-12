@@ -15,6 +15,11 @@ class ConversationEngine:
 
     def respond(self, user_input, route_result=None, session_context=None):
         route = (route_result or {}).get("route", "conversation")
+        operation = ""
+        structured = (route_result or {}).get("structured_request") if isinstance((route_result or {}).get("structured_request"), dict) else {}
+        operation = structured.get("operation") or (route_result or {}).get("operation") or ""
+        if operation == "acknowledgement":
+            return "Certo."
         if route == "greeting":
             return self.natural.greeting()
         if route == "small_talk":

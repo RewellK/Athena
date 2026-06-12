@@ -20,6 +20,8 @@ from relevance.consolidation_planner import ConsolidationPlanner
 from relevance.follow_up_question_engine import FollowUpQuestionEngine
 from relevance.relevance_engine import RelevanceEngine
 from reasoning.reasoning_engine import ReasoningEngine
+from reflection.reflection_engine import ReflectionEngine
+from reflection.reflection_store import ReflectionStore
 from self_model.self_model import SelfModel
 from world_model.world_model import WorldModel
 from core.context_builder import ContextBuilder
@@ -238,18 +240,24 @@ class FakeLLM:
                 "entities": [{"name": "Francisco", "type": "person", "confidence": 0.94}],
                 "relationships": [{"source": "Francisco", "relation": "father_of", "target": "Rewell", "confidence": 0.94}],
             }
-        if message.startswith("Ele gosta"):
+        message_lower = message.lower()
+        if message.startswith("Ele gosta") or message_lower.startswith("ele gosta"):
+            has_palio = "Palio 2008" in message
+            interest_name = "carros" if has_palio else "carro"
+            entities = [
+                {"name": "Francisco", "type": "person", "confidence": 0.92},
+                {"name": interest_name, "type": "concept", "confidence": 0.92},
+            ]
+            relationships = [
+                {"source": "Francisco", "relation": "interested_in", "target": interest_name, "confidence": 0.92},
+            ]
+            if has_palio:
+                entities.append({"name": "Palio 2008", "type": "object", "confidence": 0.90})
+                relationships.append({"source": "Francisco", "relation": "owns", "target": "Palio 2008", "confidence": 0.90})
             return {
                 **empty,
-                "entities": [
-                    {"name": "Francisco", "type": "person", "confidence": 0.92},
-                    {"name": "carros", "type": "concept", "confidence": 0.92},
-                    {"name": "Palio 2008", "type": "object", "confidence": 0.90},
-                ],
-                "relationships": [
-                    {"source": "Francisco", "relation": "interested_in", "target": "carros", "confidence": 0.92},
-                    {"source": "Francisco", "relation": "owns", "target": "Palio 2008", "confidence": 0.90},
-                ],
+                "entities": entities,
+                "relationships": relationships,
             }
         if message == "Fernanda é minha namorada.":
             return {
@@ -313,6 +321,10 @@ class FakeLLM:
 
     def _entity_response(self, prompt):
         if '"name": "Francisco"' in prompt:
+            if "Palio 2008" in prompt:
+                return "Francisco é seu pai. Você também me contou que ele gosta de carros e tem um Palio 2008."
+            if "interested_in" in prompt:
+                return "Francisco é seu pai. Você também me contou que ele gosta de carro."
             return "Francisco é seu pai. Você também me contou que ele gosta de carros e tem um Palio 2008."
         if '"name": "Fernanda"' in prompt:
             return "Fernanda é sua namorada e alguém muito importante para você. Você me disse que pretende se casar com ela e que ela é o amor da sua vida."
@@ -325,6 +337,8 @@ class FakeLLM:
             return "Entendi, Rewell. Isso parece muito importante para você. Vou guardar que Fernanda é sua namorada, que você pretende se casar com ela e que ela é o amor da sua vida. Quer me contar mais sobre a Fernanda?"
         if "Palio 2008" in prompt:
             return "Entendi. Vou associar isso ao Francisco: ele gosta de carros e tem um Palio 2008. Esse carro tem alguma história importante para sua família?"
+        if "carro" in prompt.lower():
+            return "Entendi. Vou associar isso ao Francisco: ele gosta de carro."
         if "Francisco" in prompt:
             return "Entendi, seu pai se chama Francisco."
         if "Athena" in prompt:
@@ -361,6 +375,15 @@ def make_athena(tmp_path):
     athena.consolidation_planner = ConsolidationPlanner()
     athena.world_model = WorldModel(memory, llm, context_builder, logger, "Rewell", settings)
     athena.reasoning_engine = ReasoningEngine(memory, identity, llm, context_builder, logger)
+    athena.reflection_engine = ReflectionEngine(
+        memory,
+        identity,
+        context_builder,
+        llm,
+        store=ReflectionStore(path=str(tmp_path / "logs" / "reflection_events.jsonl"), logger=logger),
+        settings=settings,
+        logger=logger,
+    )
     athena.self_model = SelfModel(memory, identity, settings, llm, context_builder)
     athena.conversation_context = ConversationContext()
     athena.conversation_router = ConversationRouter(llm, context_builder, logger, identity=identity, settings=settings, tool_registry=tool_registry, relevance_engine=athena.relevance_engine)

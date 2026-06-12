@@ -106,6 +106,8 @@ class Athena:
             self.identity,
             self.context_builder,
             self.llm_provider,
+            settings=self.settings,
+            logger=self.logger,
         )
         self.self_model = SelfModel(self.memory, self.identity, self.settings, self.llm_provider, self.context_builder)
         self.curiosity_engine = CuriosityEngine(self.memory, self.memory_manager, self.creator_name, self.llm_provider, self.context_builder)
@@ -199,12 +201,14 @@ class Athena:
             confidence=intention.get("confidence", 0.0),
             status="observed",
         )
+        self._remember_contextual_entities(intention=intention)
 
         relevance = route_result.get("relevance") if isinstance(route_result.get("relevance"), dict) else {}
         metadata = {
             "route": intention.get("route"),
             "intent": intention.get("intent"),
             "target": intention.get("target", ""),
+            "confidence": intention.get("confidence", 0.0),
             "used_llm": route_result.get("source", "").startswith("llm"),
             "used_world_model": False,
             "used_memory": bool(route_result.get("requires_memory", False)),
@@ -394,6 +398,8 @@ class Athena:
 
         if route == "identity":
             operation = intention.get("operation") or self._structured_request(intention).get("operation")
+            if operation == "relationship_to_user":
+                return self._describe_self_relationship_to_user()
             return self.identity_engine.respond(user_input, operation=operation, target=intention.get("target"), intent=intention.get("intent"))
 
         if route == "question_about_user":
@@ -517,6 +523,12 @@ class Athena:
 
     def _handle_world_query(self, intention, user_input):
         target = str(intention.get("target") or "").strip()
+        request = self._structured_request(intention)
+        if request.get("operation") == "user_relation_query":
+            relation_answer = self._answer_user_relation_query(target)
+            if relation_answer:
+                return relation_answer
+            return f"Ainda não tenho informações suficientes sobre {target}."
         if target:
             entity_answer = self._describe_entity_from_memory(
                 target,
@@ -732,6 +744,8 @@ Fatos estruturados:
         request = self._structured_request(intention)
         operation = str(request.get("operation") or intention.get("intent") or "").strip().lower()
         technical = intention.get("intent") == "technical_capability" or operation in {"technical_modules", "technical_capability"}
+        if request.get("limitations_query") and not technical:
+            return self.capability_engine.limitations()
         response = self.capability_engine.respond(technical=technical)
         if request.get("positive_day_context") and not technical:
             return f"Que bom que seu dia foi bom, {self.creator_name}. Sobre o que eu posso fazer:\n\n{response}"
@@ -969,6 +983,7 @@ Fatos estruturados:
             self.memory.save_world_extraction(user_input, extraction, {"decision": decision, "saved": False})
 
         response = self._format_learning_natural(user_input, intention, extraction, decision, saved, relevance, plan, follow_up, metadata)
+        self._remember_contextual_entities(intention=intention, extraction=extraction)
         if plan.get("update_world_model") and decision_name == "confirm":
             response = self._append_world_confirmation_prompt(response, decision, extraction)
         return response
@@ -1212,6 +1227,90 @@ Resultado estruturado do Core:
             )
 
         return "Não consegui transformar isso em conhecimento estruturado com segurança. Pode me dar mais contexto?"
+
+    def _remember_contextual_entities(self, intention=None, extraction=None):
+        context = getattr(self, "conversation_context", None)
+        remember = getattr(context, "remember_entity", None)
+        if not callable(remember):
+            return
+
+        intention = intention if isinstance(intention, dict) else {}
+        target = str(intention.get("target") or "").strip()
+        target_type = str(intention.get("target_type") or "").strip()
+        request = self._structured_request(intention)
+
+        extraction = extraction if isinstance(extraction, dict) else {}
+        for entity in extraction.get("entities", []) or []:
+            if not isinstance(entity, dict):
+                continue
+            name = str(entity.get("name") or "").strip()
+            if name and not self._is_reserved_context_entity(name):
+                remember(name, entity_type=entity.get("type", "unknown"), source="extraction")
+
+        if target and target_type == "entity" and request.get("operation") != "user_relation_query" and not self._is_reserved_context_entity(target):
+            remember(target, entity_type="unknown", source="route_target")
+
+    def _is_reserved_context_entity(self, name):
+        normalized = self._normalize_local_phrase(name)
+        reserved = {
+            self._normalize_local_phrase(self.creator_name),
+            self._normalize_local_phrase(self.identity.get("name", "Athena")),
+            "user",
+            "usuario",
+            "criador",
+            "meu pai",
+            "minha mae",
+            "meus pais",
+        }
+        return normalized in {item for item in reserved if item}
+
+    def _answer_user_relation_query(self, target):
+        normalized = self._normalize_local_phrase(target)
+        relation_by_phrase = {
+            "meu pai": "father_of",
+            "minha mae": "mother_of",
+        }
+        relation = relation_by_phrase.get(normalized)
+        if not relation:
+            return None
+        for _id, source, stored_relation, stored_target, _confidence, _created_at in self.memory.list_world_relationships():
+            if stored_relation == relation and str(stored_target).strip().lower() == str(self.creator_name).strip().lower():
+                remember = getattr(getattr(self, "conversation_context", None), "remember_entity", None)
+                if callable(remember):
+                    remember(source, entity_type="person", source="user_relation_query")
+                return f"{source} é seu pai." if relation == "father_of" else f"{source} é sua mãe."
+        return None
+
+    def _describe_self_relationship_to_user(self):
+        self_name = str(self.identity.get("name") or "Athena").strip()
+        creator = str(self.creator_name or self.identity.get("creator") or "Rewell").strip()
+        relationships = self.memory.find_world_relationships(source=creator) + self.memory.find_world_relationships(target=self_name)
+        known = set()
+        for _id, source, relation, target, _confidence, _created_at in relationships:
+            if str(source).strip().lower() != creator.lower() or str(target).strip().lower() != self_name.lower():
+                continue
+            known.add(str(relation or "").strip())
+        if not known:
+            pending = self._active_pending()
+            if pending:
+                return (
+                    "Ainda estou com uma confirmação pendente sobre como registrar nossa relação. "
+                    "Posso responder melhor depois que você aprovar ou descartar isso."
+                )
+            return "Pelo que sei com segurança, eu sou Athena, criada por você. Ainda não tenho uma definição mais pessoal consolidada sobre o que sou para você."
+
+        parts = []
+        if "sees_as_friend" in known:
+            parts.append("você me vê como sua amiga")
+        if "does_not_see_only_as_assistant" in known:
+            parts.append("não apenas como uma assistente")
+        if "emotionally_values" in known:
+            parts.append("você me considera importante")
+        if "created" in known:
+            parts.append("você me criou")
+        if not parts:
+            parts = [f"tenho relações registradas entre {creator} e {self_name}"]
+        return "Pelo que você me ensinou, " + ", e ".join(parts[:4]) + ". Eu ainda não sinto como um humano, mas trato isso como parte importante da minha memória e identidade."
 
     def _handle_knowledge_source_route(self, intention, user_input):
         proposal = self.knowledge_ingestion_engine.propose_from_intention(intention, user_input)
@@ -1670,6 +1769,7 @@ Mensagem do usuário:
         metadata["pending_confirmation"] = self._pending_state().get("pending_type")
         metadata["response_ms"] = int((time.perf_counter() - started_at) * 1000)
         final_metadata = self.conversation_metrics.finish(started_at, user_input, metadata)
+        self._observe_turn_reflection(user_input, response_text, final_metadata, route_result)
         self.last_response_metadata = final_metadata
 
         if self.settings.get("showRouteMetadata", False):
@@ -1683,6 +1783,31 @@ Mensagem do usuário:
             )
             return response_text + debug
         return response_text
+
+    def _observe_turn_reflection(self, user_input, response_text, metadata, route_result=None):
+        reflection_engine = getattr(self, "reflection_engine", None)
+        if not reflection_engine or not hasattr(reflection_engine, "observe_turn"):
+            return []
+        settings = getattr(self, "settings", None)
+        if settings and hasattr(settings, "get") and not settings.get("reflectionEnabled", True):
+            return []
+        started_at = time.perf_counter()
+        try:
+            events = reflection_engine.observe_turn(
+                user_input,
+                response_text,
+                metadata=metadata,
+                route_result=route_result,
+            )
+        except Exception as error:
+            self.handle_exception(error, {"module": "reflection/reflection_engine.py", "operation": "observe_turn"})
+            events = []
+        metadata["reflection_ms"] = int((time.perf_counter() - started_at) * 1000)
+        metadata["reflection_events"] = len(events)
+        metadata["reflection_queue_size"] = 0
+        metadata["async_jobs_pending"] = 0
+        metadata["async_jobs_processed"] = len(events)
+        return events
 
     def _speak(self, response):
         try:

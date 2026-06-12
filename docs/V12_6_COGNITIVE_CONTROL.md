@@ -22,12 +22,15 @@ Ele nao extrai fatos completos, nao responde perguntas factuais sozinho e nao co
 - `error_query`
 - `unknown_recovery`
 - `learning_candidate`
+- reconhecimento contextual de entidades recentes
+- resolução leve de pronomes
+- fuzzy matching leve de nomes recentes
 
 ## Fluxo
 
 1. A GUI chama `Athena.chat()`.
 2. `ConversationRouter` consulta o `CognitiveControlEngine`.
-3. Se a rota local for clara, o Core usa Memory, World Model, SelfModel, CapabilityEngine, ErrorAwareness ou ToolRegistry sem LLM de intencao.
+3. Se a rota local for clara, o Core usa ConversationContext, Memory, World Model, SelfModel, CapabilityEngine, ErrorAwareness ou ToolRegistry sem LLM de intencao.
 4. Se a rota local nao for clara, o `IntentResolutionEngine` pode usar LLM.
 5. Se a LLM estiver indisponivel ou retornar baixa confianca, o roteador tenta novamente o fallback local.
 6. O Core decide se aprende, consulta, raciocina, pede confirmacao ou responde.
@@ -44,6 +47,7 @@ Rotas locais claras evitam pipeline pesado:
 - recuperacao de erro de classificacao
 - pedidos de informacao externa atual sem ferramenta
 - confirmacao pendente com `sim` ou `nao`
+- pronome ou typo recente resolvido por contexto
 
 LLM continua sendo usada quando:
 
@@ -55,9 +59,19 @@ LLM continua sendo usada quando:
 
 ## Consultas de Entidade
 
-Perguntas explicitas como `quem e X?`, `voce sabe quem e X?`, `consegue me falar quem e X?` e `o que voce sabe sobre X?` viram `entity_query`.
+Perguntas e pedidos explicitos como `quem e X?`, `voce sabe quem e X?`, `voce sabe que e X?`, `consegue me falar quem e X?`, `o que voce sabe sobre X?`, `me fala sobre X`, `quero saber sobre X` e `quero que me fale sobre X` viram `entity_query`.
 
 Se a entidade ja existe no World Model, Athena responde localmente. Se nao existe, responde que ainda nao tem informacao suficiente, sem cair em `unknown` e sem transformar a pergunta em aprendizado.
+
+## Contexto Recente, Pronome e Typo
+
+`ConversationContext` mantem uma pilha efemera de entidades recentes. Isso nao e memoria permanente; e contexto de conversa.
+
+O Core registra entidades quando uma rota local identifica alvo `entity`, quando uma extracao de conhecimento retorna entidades, ou quando uma consulta relacional local resolve a entidade real.
+
+Esse contexto permite que `ela`/`dela`, `ele`/`dele` e `isso` apontem para a entidade recente clara. Tambem permite que `Fernadna` resolva para `Fernanda` quando a similaridade com entidade recente e alta.
+
+Entidades reservadas como o usuario/criador e a propria Athena nao entram nessa pilha para evitar que consultas de terceiros virem respostas sobre SelfModel.
 
 ## Aprendizado
 
@@ -91,8 +105,10 @@ As respostas agora expoem:
 - `extraction_llm_calls`
 - `reasoning_llm_calls`
 - `natural_response_llm_calls`
+- `response_llm_calls`
 - `follow_up_llm_calls`
 - `duration_ms`
+- `total_ms`
 - `total_duration_ms`
 - `tts_ms`
 - `used_memory`
@@ -105,6 +121,8 @@ As respostas agora expoem:
 O controle cognitivo nao contem nomes como Fernanda, Francisco ou Rewell, e nao responde conhecimento por nomes fixos. Exemplos com esses nomes existem apenas em testes e transcript.
 
 Termos de capacidade e intencao sao classes operacionais genericas, nao conhecimento cognitivo sobre pessoas.
+
+O ajuste de typo usa similaridade entre texto do usuario e entidades recentes, nao lista de nomes. A resolucao de pronome usa contexto efemero, nao dominio fixo.
 
 ## Estado Para V13
 

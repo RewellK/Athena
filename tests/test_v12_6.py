@@ -31,6 +31,7 @@ class AthenaV126Tests(unittest.TestCase):
             "extraction_llm_calls",
             "reasoning_llm_calls",
             "natural_response_llm_calls",
+            "response_llm_calls",
             "follow_up_llm_calls",
         }
         for message, route in cases:
@@ -41,9 +42,10 @@ class AthenaV126Tests(unittest.TestCase):
                 self.assertEqual(metadata["route"], route)
                 for key in metric_keys:
                     self.assertIn(key, metadata)
-                    self.assertEqual(metadata[key], 0)
-                self.assertEqual(metadata["duration_ms"], metadata["total_duration_ms"])
-                self.assertIn("tts_duration_ms", metadata)
+                self.assertEqual(metadata[key], 0)
+            self.assertEqual(metadata["duration_ms"], metadata["total_duration_ms"])
+            self.assertEqual(metadata["duration_ms"], metadata["total_ms"])
+            self.assertIn("tts_duration_ms", metadata)
 
     def test_learned_entity_query_avoids_heavy_pipeline(self):
         self.athena.chat("A Fernanda é minha namorada, eu amo ela, e vou me casar com ela.")
@@ -97,6 +99,93 @@ class AthenaV126Tests(unittest.TestCase):
         self.assertEqual(metadata["route"], "teach_intent")
         self.assertEqual(metadata["intent"], "teach_intent")
         self.assertIn("Pode me ensinar", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+    def test_messy_entity_query_pronoun_and_typo_use_recent_context(self):
+        response = self.athena.chat("Perfeito, você sabe que é a fernanda?")
+        metadata = self.athena.last_response_metadata
+        self.assertEqual(metadata["route"], "world_query")
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("Ainda não tenho informações suficientes", response)
+        self.assertNotIn("não sinto", response.lower())
+        self.assertEqual(metadata["llm_calls"], 0)
+
+        response = self.athena.chat("quero saber oq você sabe sobre ela.")
+        metadata = self.athena.last_response_metadata
+        self.assertEqual(metadata["route"], "world_query")
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("Fernanda", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+        response = self.athena.chat("quero que me fale sobre a Fernadna")
+        metadata = self.athena.last_response_metadata
+        self.assertEqual(metadata["route"], "world_query")
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("Fernanda", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+    def test_pronoun_recall_after_learning_known_entity_is_local(self):
+        self.athena.chat("Fernanda é minha namorada.")
+        self.athena.llm_provider.reset_calls()
+
+        response = self.athena.chat("quem é ela?")
+        metadata = self.athena.last_response_metadata
+
+        self.assertEqual(metadata["route"], "world_query")
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("Fernanda é sua namorada", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+        response = self.athena.chat("me fala dela")
+        metadata = self.athena.last_response_metadata
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("Fernanda é sua namorada", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+    def test_user_relation_and_entity_pronoun_context(self):
+        self.athena.chat("Meu pai é Francisco.")
+
+        self.athena.llm_provider.reset_calls()
+        response = self.athena.chat("quem é meu pai?")
+        self.assertEqual(self.athena.last_response_metadata["route"], "world_query")
+        self.assertIn("Francisco é seu pai", response)
+        self.assertEqual(self.athena.last_response_metadata["llm_calls"], 0)
+
+        response = self.athena.chat("ele gosta de carro.")
+        self.assertEqual(self.athena.last_response_metadata["route"], "learning")
+        self.assertEqual(self.athena.last_response_metadata["target"], "Francisco")
+        self.assertIn("Francisco", response)
+
+        self.athena.llm_provider.reset_calls()
+        response = self.athena.chat("o que você sabe sobre ele?")
+        self.assertEqual(self.athena.last_response_metadata["target"], "Francisco")
+        self.assertIn("Francisco é seu pai", response)
+        self.assertIn("gosta de carro", response)
+        self.assertEqual(self.athena.last_response_metadata["llm_calls"], 0)
+
+    def test_limitations_and_acknowledgement_are_local(self):
+        self.athena.llm_provider.reset_calls()
+        response = self.athena.chat("e oq você ainda não consegue?")
+        self.assertEqual(self.athena.last_response_metadata["route"], "capability")
+        self.assertIn("ainda não consigo", response)
+        self.assertEqual(self.athena.last_response_metadata["llm_calls"], 0)
+
+        self.athena.llm_provider.reset_calls()
+        response = self.athena.chat("sim")
+        self.assertEqual(self.athena.last_response_metadata["route"], "conversation")
+        self.assertIn("Certo", response)
+        self.assertEqual(self.athena.last_response_metadata["llm_calls"], 0)
+
+    def test_self_relationship_query_uses_learned_relationship(self):
+        self.athena.chat("Você não é minha assistente, você é minha amiga.")
+        self.athena.llm_provider.reset_calls()
+
+        response = self.athena.chat("quem é você pra mim?")
+        metadata = self.athena.last_response_metadata
+
+        self.assertEqual(metadata["route"], "identity")
+        self.assertIn("amiga", response)
+        self.assertIn("não sinto como um humano", response)
         self.assertEqual(metadata["llm_calls"], 0)
 
     def test_pending_confirmation_and_identity_are_non_blocking(self):

@@ -48,7 +48,7 @@ class ConversationRouter:
         self.cognitive_control_engine = CognitiveControlEngine(self.identity, settings)
 
     def route(self, user_input, session_context=None, pending_state=None):
-        fast_route = self._fast_route(user_input, pending_state=pending_state)
+        fast_route = self._fast_route(user_input, pending_state=pending_state, session_context=session_context)
         if fast_route:
             return fast_route
 
@@ -57,7 +57,7 @@ class ConversationRouter:
         intent_llm_calls = max(0, self._llm_call_count() - llm_calls_before)
         target = self.target_resolution_engine.resolve(resolution)
         if not resolution.get("available", True):
-            fallback = self._cognitive_fallback_route(user_input, pending_state, source_suffix="+llm_unavailable_fallback")
+            fallback = self._cognitive_fallback_route(user_input, pending_state, session_context=session_context, source_suffix="+llm_unavailable_fallback")
             if fallback:
                 fallback["intent_llm_calls"] = intent_llm_calls
                 return fallback
@@ -66,7 +66,7 @@ class ConversationRouter:
             return unavailable
 
         if resolution.get("intent") == "unknown" or self._confidence(resolution.get("confidence"), 0.0) < 0.35:
-            fallback = self._cognitive_fallback_route(user_input, pending_state, source_suffix="+llm_low_confidence_fallback")
+            fallback = self._cognitive_fallback_route(user_input, pending_state, session_context=session_context, source_suffix="+llm_low_confidence_fallback")
             if fallback:
                 fallback["intent_llm_calls"] = intent_llm_calls
                 return fallback
@@ -113,17 +113,17 @@ class ConversationRouter:
             "relevance_llm_calls": relevance_llm_calls,
         }
 
-    def _fast_route(self, user_input, pending_state=None):
+    def _fast_route(self, user_input, pending_state=None, session_context=None):
         if not self.settings:
             return None
         if not self.settings.get("fastPathEnabled", self.settings.get("useFastConversationPath", True)):
             return None
         if not self.settings.get("useFastConversationPath", True):
             return None
-        return self.cognitive_control_engine.classify(user_input, pending_state=pending_state)
+        return self.cognitive_control_engine.classify(user_input, pending_state=pending_state, session_context=session_context)
 
-    def _cognitive_fallback_route(self, user_input, pending_state=None, source_suffix=""):
-        route = self.cognitive_control_engine.classify(user_input, pending_state=pending_state)
+    def _cognitive_fallback_route(self, user_input, pending_state=None, session_context=None, source_suffix=""):
+        route = self.cognitive_control_engine.classify(user_input, pending_state=pending_state, session_context=session_context)
         if not route:
             return None
         if source_suffix:

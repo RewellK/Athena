@@ -20,10 +20,12 @@ class ConversationMetrics:
     def finish(self, started_at, input_text, metadata):
         duration_ms = int((time.perf_counter() - started_at) * 1000)
         payload = dict(metadata or {})
+        payload["response_llm_calls"] = payload.get("response_llm_calls", payload.get("natural_response_llm_calls", 0))
         payload.update({
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "input": self._clip(input_text),
             "duration_ms": duration_ms,
+            "total_ms": duration_ms,
             "total_duration_ms": duration_ms,
         })
         try:

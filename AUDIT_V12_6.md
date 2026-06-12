@@ -53,6 +53,9 @@ Foram inspecionados: `README.md`, `AUDIT_V11.md`, `AUDIT_V12.md`, `AUDIT_V12_1.m
 ## 5. Files Changed
 
 - `brain/orchestrator.py`
+- `conversation/capability_engine.py`
+- `conversation/conversation_context.py`
+- `conversation/conversation_engine.py`
 - `conversation/cognitive_control_engine.py`
 - `conversation/conversation_metrics.py`
 - `conversation/conversation_router.py`
@@ -74,8 +77,12 @@ Foram inspecionados: `README.md`, `AUDIT_V11.md`, `AUDIT_V12.md`, `AUDIT_V12_1.m
 - Metricas por etapa de LLM: intent, relevance, extraction, reasoning, natural response e follow-up.
 - `CognitiveControlEngine` explicito para rotas locais genericas e fallback quando a LLM de intencao esta indisponivel.
 - Consultas como `quem e X?`, `voce sabe quem e X?` e `consegue me falar quem e X?` preservam `entity_query`.
+- Consultas humanas imperfeitas como `voce sabe que e X?`, `me fala sobre X`, `quero saber sobre X` e `quero que me fale sobre X` agora preservam `entity_query`.
+- `ConversationContext` passou a rastrear entidades recentes para resolver pronomes e typos leves sem tocar memoria permanente.
 - Afirmações ensinaveis claras viram `learning_candidate` em vez de `unknown` quando a LLM de intencao falha.
 - `teach_intent` responde localmente a pedidos como `posso te ensinar?`.
+- `sim` sem pendencia ativa agora usa acknowledgement local e evita pipeline pesado.
+- Consultas de limitacao como `o que voce ainda nao consegue?` usam `CapabilityEngine` local.
 - `total_duration_ms` e `tts_duration_ms` foram adicionados sem remover campos antigos.
 - Consultas externas atuais genericas, como preco/eventos atuais, agora caem em resposta honesta de ferramenta ausente sem inventar fatos.
 - Reset seguro de banco foi adicionado com confirmacao forte e backup obrigatorio.
@@ -110,10 +117,12 @@ Metricas adicionadas:
 - `extraction_llm_calls`
 - `reasoning_llm_calls`
 - `natural_response_llm_calls`
+- `response_llm_calls`
 - `follow_up_llm_calls`
 - `used_memory`
 - `pending_confirmation`
 - `tts_duration_ms`
+- `total_ms`
 - `total_duration_ms`
 
 Casos locais esperados com 0 chamadas LLM:
@@ -167,7 +176,7 @@ Athena evita inventar fatos externos atuais. Sem ferramenta configurada, respond
 
 - `tests.test_v12_5`: OK, 5 testes.
 - `tests.test_v12_5_1`: OK, 9 testes.
-- `tests.test_v12_6`: OK, 10 testes.
+- `tests.test_v12_6`: OK, 15 testes.
 - `tests.test_asl_v0`: OK, 1 teste.
 - `py_compile`: OK.
 - `git diff --check`: OK.
@@ -205,6 +214,22 @@ Recomendacao: Athena esta pronta para iniciar V13 Desktop Presence como proxima 
 
 A V12.6 agora possui `CognitiveControlEngine`, usado pelo `ConversationRouter` antes da LLM de intencao e novamente como fallback quando a LLM esta indisponivel ou com baixa confianca. Ele escolhe rotas locais, mas nao extrai conhecimento nem responde fatos por nomes fixos.
 
+Diagnostico final:
+- O fluxo quebrado estava entre `ConversationRouter`, `CognitiveControlEngine` e `ConversationContext`.
+- A frase real `voce sabe que e a fernanda?` nao era reconhecida como consulta de entidade e podia virar aprendizado sobre Athena.
+- Pronomes como `ela`/`dela` e typos como `Fernadna` nao tinham memoria efemera de contexto para resolver o alvo recente.
+- O disclaimer `Athena nao sente como humano` aparecia fora do alvo self porque a rota caia em aprendizado/self quando deveria ser `entity_query`.
+
+Refatoracao profunda nao foi necessaria. Memory, World Model, SelfModel, Reasoning, Relevance, CapabilityEngine, ErrorAwareness, ToolRegistry e GUI via `Athena.chat()` foram preservados.
+
+O que foi refeito:
+- controle cognitivo local para pedidos humanos imperfeitos sobre entidade;
+- contexto efemero de entidades recentes;
+- resolucao local de pronome e typo recente;
+- resposta local para limitacoes;
+- acknowledgement local para `sim` sem pendencia;
+- resposta local para `quem e voce pra mim?` usando relacoes aprendidas.
+
 Decisao local vs LLM:
 - perguntas simples de identidade, capacidade, entidade conhecida, erro, confirmacao pendente e informacao externa atual sem ferramenta seguem caminho local;
 - aprendizado novo ainda passa por World Model, Relevance e Consolidation;
@@ -214,13 +239,18 @@ Decisao local vs LLM:
 
 Conversa executada com `python3 tests/manual_conversation_v12_6.py`. Resumo dos pontos criticos:
 
-- `que legal, consegue me falar quem é a Fernanda?` -> `world_query`, `llm_calls=0`, desconhecimento natural.
+- `Perfeito, você sabe que é a fernanda?` -> `world_query`, target `Fernanda`, `llm_calls=0`, desconhecimento natural.
+- `quero saber oq você sabe sobre ela.` -> target `Fernanda`, `llm_calls=0`.
+- `quero que me fale sobre a Fernadna` -> fuzzy para `Fernanda`, `llm_calls=0`.
 - `Fernanda é minha namorada.` -> `learning`, salva estrutura com apoio da LLM de extracao.
-- `quem é Fernanda?` -> `world_query`, `llm_calls=0`, resposta local: `Fernanda é sua namorada.`
-- `Quem é Francisco?` -> `world_query`, `llm_calls=0`, resposta local: `Francisco é seu pai.`
-- `Hoje meu dia foi muito bom, o que você pode fazer?` -> `capability`, `llm_calls=0`.
-- `o que você não entendeu?` -> `unknown_recovery`, sem loop de fallback.
-- `Qual a previsão do clima hoje?` -> `external_information`, `llm_calls=0`, sem inventar ferramenta.
+- `quem é ela?` e `me fala dela` -> recall local de Fernanda, `llm_calls=0`.
+- `quem é meu pai?` -> resposta local `Francisco é seu pai.`
+- `ele gosta de carro.` -> learning target `Francisco`; depois `o que você sabe sobre ele?` recupera Francisco e carro localmente.
+- `Hoje meu dia foi muito bom, oq vc faz mesmo?` -> `capability`, `llm_calls=0`.
+- `e oq você ainda não consegue?` -> limitações locais, `llm_calls=0`.
+- `qual a previsão do clima de amanhã?` e `quais são as notícias de hoje?` -> `external_information`, `llm_calls=0`, sem inventar ferramenta.
+- `quem é você pra mim?` -> relação aprendida com Athena, `llm_calls=0`.
+- Com `useLLM=false`, `quem é Fernanda?`, `Fernanda é minha namorada.`, `posso te ensinar?`, `o que você pode fazer?` e `quem é você?` sobrevivem sem unknown.
 
 Transcript completo: `docs/V12_6_CONVERSATION_TRANSCRIPT.md`.
 

@@ -17,7 +17,6 @@ Sim, com ressalvas. Athena esta pronta para iniciar V13 como camada de presenca 
 - UI mais rica de voz/presenca.
 - Botao visual de reset seguro.
 - Generalizacao mais elegante de verbalizacao relacional.
-- Reduzir chamadas LLM para respostas curtas como `sim` quando nao ha confirmacao pendente.
 - ASL versionado e integrado de forma opcional, se ainda fizer sentido.
 
 ## ASL
@@ -63,8 +62,13 @@ Transcript completo: `docs/V12_6_CONVERSATION_TRANSCRIPT.md`.
 Pontos confirmados:
 
 - consulta de entidade desconhecida nao cai em `unknown`;
+- consulta imperfeita como `voce sabe que e a fernanda?` preserva `entity_query`;
+- pronome `ela`/`dela` resolve para entidade recente;
+- typo recente como `Fernadna` resolve por similaridade para `Fernanda`;
 - aprendizado novo nao vira `unknown`;
 - consulta de entidade conhecida usa World Model/memoria local com `llm_calls=0`;
+- `sim` sem pendencia ativa nao chama pipeline pesado;
 - capability query local usa `llm_calls=0`;
+- consulta de limitacoes usa `CapabilityEngine`;
 - unknown recovery nao repete fallback;
 - informacao externa atual sem ferramenta nao e inventada.

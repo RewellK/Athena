@@ -12,6 +12,13 @@ class CapabilityEngine:
             return self._technical_response()
         return self._summary_response()
 
+    def limitations(self):
+        return (
+            "Eu ainda não consigo consultar clima, notícias, preços ou eventos em tempo real sem uma ferramenta externa configurada. "
+            "Também não devo executar ações no sistema sem aprovação humana, nem inventar fatos quando minha memória e meu World Model não têm evidência. "
+            "Minha voz é opcional e pode depender da configuração local."
+        )
+
     def _summary_response(self):
         voice = "voz" if self._voice_enabled() else "voz opcional"
         git = "leitura Git" if self._git_available() else "leitura Git quando houver repositório local"
