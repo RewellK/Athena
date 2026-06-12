@@ -254,13 +254,38 @@ class CognitiveControlEngine:
     def _external_tool_missing(self, _user_input, words, _session_context=None):
         if len(words) > 20:
             return None
-        if not self._looks_like_question(words):
-            return None
         word_set = set(words)
-        current_terms = {"hoje", "agora", "atual", "atuais", "real", "previsao", "cotacao", "manchetes"}
-        if not (word_set & current_terms):
+        external_terms = {
+            "hoje",
+            "agora",
+            "atual",
+            "atuais",
+            "real",
+            "previsao",
+            "cotacao",
+            "manchetes",
+            "noticia",
+            "noticias",
+            "clima",
+            "tempo",
+            "temperatura",
+            "chuva",
+            "preco",
+            "valor",
+            "custa",
+            "custaria",
+            "fipe",
+            "carro",
+            "veiculo",
+            "veiculos",
+        }
+        if not (word_set & external_terms):
             return None
-        target = "informacao externa atual"
+        price_terms = {"preco", "valor", "custa", "custaria", "cotacao"}
+        if not self._looks_like_question(words) and not (word_set & price_terms):
+            return None
+        domain = self._external_domain(words)
+        target = self._external_domain_label(domain)
         return self._route_result(
             route="external_information",
             intent="external_information",
@@ -268,7 +293,7 @@ class CognitiveControlEngine:
             target_type="tool",
             requires_tool=True,
             tool_name=target,
-            structured_request={"operation": "external_tool_missing"},
+            structured_request={"operation": "external_tool_missing", "domain": domain},
             source="local_cognitive_external_tool_missing",
         )
 
@@ -448,6 +473,29 @@ class CognitiveControlEngine:
         if any(words[index] == "quem" and index + 1 < len(words) and words[index + 1] in {"e", "eh"} for index in range(len(words))):
             return True
         return self._looks_like_entity_information_request(words)
+
+    def _external_domain(self, words):
+        word_set = set(words)
+        if word_set & {"clima", "tempo", "previsao", "chuva", "temperatura", "calor", "frio"}:
+            return "weather"
+        if word_set & {"noticia", "noticias", "manchete", "manchetes", "jornal"}:
+            return "news"
+        if word_set & {"fipe", "carro", "veiculo", "veiculos", "moto", "automovel", "caminhonete"}:
+            return "vehicles"
+        if word_set & {"preco", "valor", "custa", "custaria"} and any(word.isdigit() and len(word) == 4 for word in words):
+            return "vehicles"
+        if word_set & {"bitcoin", "dolar", "euro", "acao", "acoes", "cotacao", "bolsa", "cripto"}:
+            return "finance"
+        return "unknown_external"
+
+    def _external_domain_label(self, domain):
+        return {
+            "weather": "clima",
+            "news": "noticias",
+            "vehicles": "veiculos",
+            "finance": "cotacao",
+            "unknown_external": "informacao externa atual",
+        }.get(domain, "informacao externa atual")
 
     def _looks_like_entity_information_request(self, words):
         word_set = set(words)

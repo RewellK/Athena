@@ -23,6 +23,7 @@ from reasoning.reasoning_engine import ReasoningEngine
 from reflection.reflection_engine import ReflectionEngine
 from reflection.reflection_store import ReflectionStore
 from self_model.self_model import SelfModel
+from sources.source_manager import SourceManager
 from world_model.world_model import WorldModel
 from core.context_builder import ContextBuilder
 
@@ -50,6 +51,13 @@ class FakeSettings:
             "pendingConfirmationBlocksConversation": False,
             "pendingConfirmationTtlSeconds": 300,
             "intentResolutionTimeoutSeconds": 8,
+            "sourcesEnabled": True,
+            "allowExternalRequests": True,
+            "requireConfirmationForNewSources": True,
+            "sourceRegistryPath": "",
+            "evidenceStorePath": "",
+            "externalResearchAsyncEnabled": True,
+            "externalResearchTimeoutSeconds": 15,
             "useAthenaSemanticLanguage": False,
         }
         self.values.update(values or {})
@@ -390,6 +398,7 @@ def make_athena(tmp_path):
     athena.conversation_engine = ConversationEngine(identity, llm, context_builder, health_engine=None, logger=logger, settings=settings)
     athena.identity_engine = IdentityEngine(identity, athena.self_model)
     athena.capability_engine = CapabilityEngine(settings=settings)
+    athena.source_manager = SourceManager(settings=settings)
     athena.message_sound_engine = NullSound()
     athena.voice_engine = NullVoice()
     athena.conversation_metrics = ConversationMetrics(path=str(tmp_path / "logs" / "conversation_metrics.jsonl"), logger=logger)
@@ -397,6 +406,7 @@ def make_athena(tmp_path):
     athena.pending_world_extraction = None
     athena.pending_knowledge_ingestion = None
     athena.pending_plan = None
+    athena.pending_source_proposal = None
     athena.pending_history = []
     athena.last_unknown_interaction = None
     return athena

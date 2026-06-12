@@ -144,6 +144,23 @@ class ReflectionEngineTests(unittest.TestCase):
         )
         self.assertIn("slow_known_recall", self.issue_types(slow_events))
 
+    def test_external_answer_without_validated_source_is_detected(self):
+        events = self.engine.analyze_turn(
+            "qual a previsão do clima amanhã?",
+            "Amanhã vai fazer sol em Embu das Artes.",
+            metadata={
+                "route": "external_information",
+                "intent": "external_information",
+                "target": "clima",
+                "source_available": True,
+                "source_status": "job_completed",
+                "tool_available": True,
+                "evidence_id": "",
+            },
+        )
+
+        self.assertIn("external_answer_without_validated_source", self.issue_types(events))
+
     def test_local_report_uses_stored_hypotheses_and_does_not_call_llm(self):
         self.engine.observe_turn(
             "quem é Fernanda?",

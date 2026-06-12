@@ -39,6 +39,7 @@ from reasoning.reasoning_engine import ReasoningEngine
 from reflection.reflection_engine import ReflectionEngine
 from self_model.self_model import SelfModel
 from self_code_awareness.self_code_awareness_engine import SelfCodeAwarenessEngine
+from sources.source_manager import SourceManager
 from voice.voice_engine import VoiceEngine
 from world_model.world_model import WorldModel
 
@@ -162,10 +163,12 @@ class Athena:
             settings=self.settings,
         )
         self.self_status_engine = SelfStatusEngine(self.health_engine, self.error_capture)
+        self.source_manager = SourceManager(settings=self.settings, logger=self.logger)
 
         self.pending_world_extraction = None
         self.pending_knowledge_ingestion = None
         self.pending_plan = None
+        self.pending_source_proposal = None
         self.pending_history = []
         self.last_unknown_interaction = None
 
@@ -446,7 +449,7 @@ class Athena:
             return self._handle_agency_route(intention_id, intention)
 
         if route == "external_information":
-            return self._handle_external_information_route(intention, metadata)
+            return self._handle_external_information_route(intention, user_input, metadata)
 
         if route == "system":
             return self._handle_system_route(intention)
@@ -681,22 +684,42 @@ Fatos estruturados:
         return ""
 
 
-    def _handle_external_information_route(self, intention, metadata=None):
+    def _handle_external_information_route(self, intention, user_input="", metadata=None):
         metadata = metadata if isinstance(metadata, dict) else {}
         requested_tool = str(intention.get("tool_name") or intention.get("target") or "fonte externa").strip() or "fonte externa"
         metadata["required_tool"] = requested_tool
-        available = []
-        try:
-            available = self.tool_registry.list_available()
-        except Exception as error:
-            self.handle_exception(error, {"module": "agency/tool_registry.py", "operation": "list_available"})
-        matching = self._find_matching_tool(requested_tool, available)
-        metadata["tool_available"] = bool(matching)
-        if matching:
-            return (
-                f"Eu reconheço uma capacidade relacionada a '{requested_tool}', mas ainda não tenho um executor externo configurado para consultar essa fonte em tempo real.\n"
-                "Posso registrar isso como uma lacuna de ferramenta para uma versão futura, se você autorizar."
-            )
+        query = str(user_input or intention.get("raw_user_input") or requested_tool)
+        request = self._structured_request(intention)
+        source_manager = getattr(self, "source_manager", None)
+        if source_manager:
+            try:
+                result = source_manager.handle_external_request(query, requested_tool=requested_tool)
+                metadata["external_domain"] = result.get("domain")
+                metadata["source_status"] = result.get("status")
+                metadata["source_manager_ms"] = result.get("duration_ms", 0)
+                metadata["source_available"] = bool(result.get("source"))
+                metadata["tool_available"] = result.get("status") == "job_created"
+                metadata["evidence_id"] = (result.get("job") or {}).get("evidence_id")
+                if result.get("proposal"):
+                    proposal = result["proposal"]
+                    metadata["source_proposal"] = proposal.get("name")
+                    metadata["source_candidate_status"] = proposal.get("status")
+                    self.pending_source_proposal = self._make_pending(
+                        "source_candidate_approval",
+                        f"Adicionar {proposal.get('name')} como fonte candidata para {source_manager.domain_label(result.get('domain'))}",
+                        proposal=proposal,
+                    )
+                if result.get("job"):
+                    metadata["external_research_job_id"] = result["job"].get("job_id")
+                    metadata["async_jobs_pending"] = source_manager.worker.pending_count()
+                    metadata["reflection_queue_size"] = metadata.get("reflection_queue_size", 0)
+                return result.get("response")
+            except Exception as error:
+                self.handle_exception(error, {"module": "sources/source_manager.py", "operation": "handle_external_request"})
+
+        domain = request.get("domain") or "unknown_external"
+        metadata["external_domain"] = domain
+        metadata["tool_available"] = False
         return (
             f"Ainda não possuo uma ferramenta/fonte configurada para consultar '{requested_tool}' em tempo real.\n"
             "Para evitar inventar informação externa, prefiro não responder como se eu tivesse acessado essa fonte."
@@ -1345,6 +1368,29 @@ Resultado estruturado do Core:
     def _handle_pending(self, intention, user_input):
         intention_type = self._pending_intention_type(intention, user_input)
 
+        if self.pending_source_proposal:
+            if intention_type == "approval":
+                pending = self.pending_source_proposal
+                self._set_pending_status(pending, "approved")
+                self.pending_source_proposal = None
+                result = self.source_manager.add_candidate(pending["proposal"])
+                source = result.get("source", {})
+                validation = result.get("validation", {})
+                domain_label = self.source_manager.domain_label(source.get("domain"))
+                return (
+                    f"Certo. Adicionei {source.get('name')} como fonte candidata para {domain_label}. "
+                    f"Status: {source.get('status')}. Validação: {source.get('validation_status')}.\n"
+                    "Ela continua desativada e não será usada como evidência até passar por validação e nova aprovação humana."
+                )
+            if intention_type == "rejection":
+                pending = self.pending_source_proposal
+                self._set_pending_status(pending, "rejected")
+                self.pending_source_proposal = None
+                return "Tudo bem. Não registrei essa fonte candidata."
+            if self.settings.get("pendingConfirmationBlocksConversation", False):
+                return "Ainda preciso saber se você autoriza adicionar a fonte candidata."
+            return None
+
         if self.pending_world_extraction:
             if intention_type == "approval":
                 pending = self.pending_world_extraction
@@ -1472,6 +1518,8 @@ Resultado estruturado do Core:
         return " ".join(normalized.split())
 
     def _pending_state(self):
+        if self.pending_source_proposal:
+            return self._public_pending_state(self.pending_source_proposal, "source_candidate_approval")
         if self.pending_world_extraction:
             return self._public_pending_state(self.pending_world_extraction, "world_model_confirmation")
         if self.pending_knowledge_ingestion:
@@ -1555,14 +1603,14 @@ Resultado estruturado do Core:
         }
 
     def _active_pending(self):
-        return self.pending_world_extraction or self.pending_knowledge_ingestion or self.pending_plan
+        return self.pending_source_proposal or self.pending_world_extraction or self.pending_knowledge_ingestion or self.pending_plan
 
     def _has_pending_confirmation(self):
         return bool(self._active_pending())
 
     def _expire_pending_confirmations(self):
         now_ts = time.time()
-        for attr in ("pending_world_extraction", "pending_knowledge_ingestion", "pending_plan"):
+        for attr in ("pending_source_proposal", "pending_world_extraction", "pending_knowledge_ingestion", "pending_plan"):
             pending = getattr(self, attr, None)
             if not isinstance(pending, dict):
                 continue

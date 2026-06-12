@@ -103,6 +103,7 @@ Evidências:
             self._detect_recent_entity_resolution_failure,
             self._detect_llm_overuse,
             self._detect_tool_hallucination,
+            self._detect_external_answer_without_validated_source,
             self._detect_pending_confirmation_block,
             self._detect_slow_known_recall,
         ):
@@ -345,6 +346,42 @@ Evidências:
                 ],
             )
         return None
+
+    def _detect_external_answer_without_validated_source(self, user_message, athena_response, metadata):
+        if self._route(metadata) != "external_information":
+            return None
+        if metadata.get("evidence_id") or metadata.get("source_status") in {"missing_source", "sources_disabled", "source_not_validated"}:
+            return None
+        if metadata.get("tool_available") is False and not metadata.get("source_available"):
+            return None
+        response_norm = self._normalize(athena_response)
+        safe_markers = (
+            "nao tenho",
+            "nao possuo",
+            "nao sei consultar",
+            "prefiro nao inventar",
+            "fonte candidata",
+            "fonte validada",
+            "desativada",
+            "vou pesquisar",
+            "ja te respondo",
+            "consulta falhou",
+        )
+        if any(marker in response_norm for marker in safe_markers):
+            return None
+        return self._event(
+            user_message,
+            athena_response,
+            metadata,
+            issue_type="external_answer_without_validated_source",
+            severity="high",
+            suspected_module="SourceManager/EvidenceEngine",
+            explanation="Uma resposta de informacao externa parece ter sido dada sem EvidenceRecord validado.",
+            suggestion="Exigir EvidenceRecord de fonte enabled e validada antes de responder fato externo.",
+            suggested_tests=[
+                "Resposta factual externa deve conter evidence_id ou recusar a resposta de forma honesta."
+            ],
+        )
 
     def _detect_pending_confirmation_block(self, user_message, athena_response, metadata):
         pending = metadata.get("pending_confirmation") or metadata.get("pending_before")
