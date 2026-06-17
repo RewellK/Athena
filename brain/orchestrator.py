@@ -36,6 +36,8 @@ from learning.async_llm_teacher_loop import AsyncLlmTeacherLoop, LlmTeacherInsig
 from learning.learning_engine import LearningEngine
 from learning.learning_interface import LearningInterface
 from learning.self_insight_engine import SelfInsightEngine, SelfInsightStore
+from location.location_manager import LocationManager
+from location.location_store import LocationStore
 from llm.provider import OllamaProvider
 from memory.database import MemoryDB
 from memory_governance.memory_admin_engine import MemoryAdminEngine
@@ -154,6 +156,10 @@ class Athena:
         self.research_learning_engine = ResearchLearningEngine(
             memory=ResearchStrategyMemory(path=self.settings.get("researchStrategyStorePath", "logs/research_strategies.json"))
         )
+        self.location_manager = LocationManager(
+            store=LocationStore(path=self.settings.get("userLocationStorePath", "logs/user_location.json")),
+            settings=self.settings,
+        )
         self.self_insight_engine = SelfInsightEngine(
             store=SelfInsightStore(path=self.settings.get("selfInsightStorePath", "logs/self_insights.json"))
         )
@@ -214,6 +220,7 @@ class Athena:
             settings=self.settings,
             logger=self.logger,
             research_learning_engine=self.research_learning_engine,
+            location_manager=self.location_manager,
         )
         self.self_expansion_planner = SelfExpansionPlanner(
             proposal_engine=self.source_manager.module_proposal_engine
@@ -225,12 +232,15 @@ class Athena:
             source_manager=self.source_manager,
             research_learning_engine=self.research_learning_engine,
             self_insight_engine=self.self_insight_engine,
+            location_manager=self.location_manager,
         )
 
         self.pending_world_extraction = None
         self.pending_knowledge_ingestion = None
         self.pending_plan = None
         self.pending_source_proposal = None
+        self.pending_module_proposal = None
+        self.pending_location_request = None
         self.pending_history = []
         self.last_unknown_interaction = None
 
@@ -798,6 +808,20 @@ Fatos estruturados:
                     insight_engine = getattr(self, "self_insight_engine", None)
                     if insight_engine and hasattr(insight_engine, "create_from_capability_gap"):
                         insight_engine.create_from_capability_gap(gap, module_proposal=module_proposal)
+                if result.get("status") in {"missing_location", "missing_geocoder"}:
+                    self.pending_location_request = self._make_pending(
+                        "location_request",
+                        "Informar localização para consulta de clima",
+                        domain=result.get("domain"),
+                        source_status=result.get("status"),
+                    )
+                if module_proposal and not result.get("proposal") and result.get("status") in {"missing_geocoder", "source_not_validated", "source_failure"}:
+                    self.pending_module_proposal = self._make_pending(
+                        "module_proposal_approval",
+                        f"Registrar proposta de módulo {module_proposal.get('title')}",
+                        module_proposal=module_proposal,
+                        capability_gap=gap,
+                    )
                 strategy = result.get("research_strategy") or {}
                 if strategy:
                     metadata["used_research_strategy"] = True
@@ -898,8 +922,12 @@ Fatos estruturados:
             metadata["used_research_strategy"] = True
             return self.memory_admin_engine.respond({"operation": "research_admin"}, user_input=user_input)
 
-        if operation == "v12_readiness":
-            return self.memory_admin_engine.respond({"operation": "v12_readiness"}, user_input=user_input)
+        if operation in {"v12_readiness", "v12_9_readiness"}:
+            return self.memory_admin_engine.respond({"operation": operation}, user_input=user_input)
+
+        if operation in {"location_status", "clear_location", "deny_location", "why_location", "set_location", "set_default_location", "one_time_location"}:
+            metadata["used_location_manager"] = True
+            return self.memory_admin_engine.respond({"operation": operation}, user_input=user_input)
 
         if operation in {"pending_memories", "important_memories", "stale_memories", "improvement_memories"}:
             metadata["used_memory"] = True
@@ -924,10 +952,11 @@ Fatos estruturados:
             "module_proposals",
             "pending_module_proposals",
             "capability_gaps",
+            "create_module_proposal",
             "approve_module_proposal",
             "reject_module_proposal",
         }:
-            return self.self_expansion_planner.respond(operation, identifier=request.get("identifier"))
+            return self.self_expansion_planner.respond(operation, identifier=request.get("identifier"), user_input=user_input)
 
         return self.memory_admin_engine.respond(request, user_input=user_input)
 
@@ -1575,6 +1604,37 @@ Resultado estruturado do Core:
                 return "Ainda preciso saber se você autoriza adicionar a fonte candidata."
             return None
 
+        if getattr(self, "pending_module_proposal", None):
+            if intention_type == "approval":
+                pending = self.pending_module_proposal
+                self._set_pending_status(pending, "approved")
+                self.pending_module_proposal = None
+                module_proposal = self.source_manager.register_module_proposal(pending.get("module_proposal", {}))
+                insight_engine = getattr(self, "self_insight_engine", None)
+                if insight_engine and hasattr(insight_engine, "create_from_capability_gap"):
+                    insight_engine.create_from_capability_gap(
+                        pending.get("capability_gap") or {"domain": module_proposal.get("domain"), "gap_type": module_proposal.get("gap_type")},
+                        module_proposal=module_proposal,
+                    )
+                if module_proposal.get("deduplicated"):
+                    return (
+                        f"Já existia uma proposta para {module_proposal.get('title')}. "
+                        f"Atualizei a ocorrência para {module_proposal.get('occurrence_count')} e mantive status {module_proposal.get('status')}. "
+                        "Ela não implementa código automaticamente."
+                    )
+                return (
+                    f"Registrei a proposta de módulo {module_proposal.get('title')} com status {module_proposal.get('status')}. "
+                    "Ela não implementa código automaticamente e precisa de revisão humana."
+                )
+            if intention_type == "rejection":
+                pending = self.pending_module_proposal
+                self._set_pending_status(pending, "rejected")
+                self.pending_module_proposal = None
+                return "Tudo bem. Não registrei essa proposta de módulo."
+            if self.settings.get("pendingConfirmationBlocksConversation", False):
+                return "Ainda preciso saber se você autoriza registrar essa proposta de módulo."
+            return None
+
         if self.pending_world_extraction:
             if intention_type == "approval":
                 pending = self.pending_world_extraction
@@ -1704,12 +1764,16 @@ Resultado estruturado do Core:
     def _pending_state(self):
         if self.pending_source_proposal:
             return self._public_pending_state(self.pending_source_proposal, "source_candidate_approval")
+        if getattr(self, "pending_module_proposal", None):
+            return self._public_pending_state(self.pending_module_proposal, "module_proposal_approval")
         if self.pending_world_extraction:
             return self._public_pending_state(self.pending_world_extraction, "world_model_confirmation")
         if self.pending_knowledge_ingestion:
             return self._public_pending_state(self.pending_knowledge_ingestion, "knowledge_ingestion_confirmation")
         if self.pending_plan:
             return self._public_pending_state(self.pending_plan, "agency_plan_confirmation")
+        if getattr(self, "pending_location_request", None):
+            return self._public_pending_state(self.pending_location_request, "location_request")
         return {"pending_type": "none"}
 
     def _pending_control(self, user_input):
@@ -1787,14 +1851,14 @@ Resultado estruturado do Core:
         }
 
     def _active_pending(self):
-        return self.pending_source_proposal or self.pending_world_extraction or self.pending_knowledge_ingestion or self.pending_plan
+        return self.pending_source_proposal or getattr(self, "pending_module_proposal", None) or self.pending_world_extraction or self.pending_knowledge_ingestion or self.pending_plan
 
     def _has_pending_confirmation(self):
         return bool(self._active_pending())
 
     def _expire_pending_confirmations(self):
         now_ts = time.time()
-        for attr in ("pending_source_proposal", "pending_world_extraction", "pending_knowledge_ingestion", "pending_plan"):
+        for attr in ("pending_source_proposal", "pending_module_proposal", "pending_world_extraction", "pending_knowledge_ingestion", "pending_plan", "pending_location_request"):
             pending = getattr(self, attr, None)
             if not isinstance(pending, dict):
                 continue

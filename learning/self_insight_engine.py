@@ -4,6 +4,7 @@ import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from hashlib import sha256
 
 
 @dataclass
@@ -22,9 +23,19 @@ class SelfInsight:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     insight_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    dedup_key: str = ""
+    occurrence_count: int = 1
+    first_seen_at: str = ""
+    last_seen_at: str = ""
+    related_event_ids: list = field(default_factory=list)
 
     def to_dict(self):
-        return asdict(self)
+        payload = asdict(self)
+        payload["dedup_key"] = payload.get("dedup_key") or _insight_dedup_key(payload)
+        payload["occurrence_count"] = int(payload.get("occurrence_count") or 1)
+        payload["first_seen_at"] = payload.get("first_seen_at") or payload.get("created_at")
+        payload["last_seen_at"] = payload.get("last_seen_at") or payload.get("updated_at")
+        return payload
 
     @classmethod
     def from_dict(cls, payload):
@@ -44,6 +55,19 @@ class SelfInsightStore:
         insight = insight if isinstance(insight, SelfInsight) else SelfInsight.from_dict(insight)
         payload = insight.to_dict()
         with self._lock:
+            existing = self._find_existing(payload)
+            if existing:
+                existing["occurrence_count"] = int(existing.get("occurrence_count") or 1) + 1
+                existing["last_seen_at"] = datetime.now().isoformat(timespec="seconds")
+                existing["updated_at"] = existing["last_seen_at"]
+                existing["deduplicated"] = True
+                event_id = payload.get("source_id")
+                related = list(existing.get("related_event_ids") or [])
+                if event_id and event_id not in related:
+                    related.append(event_id)
+                existing["related_event_ids"] = related
+                self._save()
+                return dict(existing)
             self._insights.append(payload)
             self._save()
         return payload
@@ -75,6 +99,14 @@ class SelfInsightStore:
         except (OSError, json.JSONDecodeError):
             return
         self._insights = list(payload.get("insights", [])) if isinstance(payload, dict) else []
+
+    def _find_existing(self, payload):
+        dedup_key = payload.get("dedup_key") or _insight_dedup_key(payload)
+        for item in self._insights:
+            item["dedup_key"] = item.get("dedup_key") or _insight_dedup_key(item)
+            if item.get("dedup_key") == dedup_key:
+                return item
+        return None
 
     def _save(self):
         if not self.path:
@@ -108,6 +140,7 @@ class SelfInsightEngine:
             confidence=0.6,
             requires_human_review=True,
             metadata={"issue_type": event.get("issue_type"), "severity": event.get("severity")},
+            related_event_ids=[event.get("event_id")] if event.get("event_id") else [],
         ))
 
     def create_from_teacher_insight(self, insight):
@@ -170,3 +203,27 @@ class SelfInsightEngine:
 
     def reject(self, insight_id):
         return self.store.update_status(insight_id, "rejected")
+
+
+def _insight_dedup_key(payload):
+    metadata = dict(payload.get("metadata") or {})
+    gap = dict(metadata.get("gap") or {})
+    module_proposal = dict(metadata.get("module_proposal") or {})
+    if str(payload.get("insight_type") or "").strip().lower() == "missing_capability":
+        parts = [
+            "missing_capability",
+            str(gap.get("domain") or "").strip().lower(),
+            str(module_proposal.get("title") or "").strip().lower(),
+        ]
+        return sha256("|".join(parts).encode("utf-8")).hexdigest()
+    parts = [
+        str(payload.get("insight_type") or "").strip().lower(),
+        str(payload.get("suspected_module") or "").strip().lower(),
+        str(payload.get("source") or "").strip().lower(),
+        str(metadata.get("issue_type") or "").strip().lower(),
+        str(gap.get("domain") or "").strip().lower(),
+        str(module_proposal.get("title") or "").strip().lower(),
+        str(payload.get("content") or "")[:120].strip().lower(),
+    ]
+    raw = "|".join(parts)
+    return sha256(raw.encode("utf-8")).hexdigest()

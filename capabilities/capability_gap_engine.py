@@ -54,6 +54,16 @@ class CapabilityGapEngine:
                 source_candidate=source.get("name", ""),
                 reason="Consulta de clima precisa de localização ou geocoder configurado.",
             ).to_dict()
+        if status == "missing_geocoder":
+            return CapabilityGap(
+                gap_type="missing_connector",
+                domain=domain,
+                requested_capability="geocoding",
+                missing_inputs=["latitude", "longitude"],
+                source_status=status,
+                source_candidate=source.get("name", ""),
+                reason="Existe cidade salva, mas falta um geocoder validado para obter latitude/longitude.",
+            ).to_dict()
         if status == "source_failure":
             return CapabilityGap(
                 gap_type="missing_resilience",

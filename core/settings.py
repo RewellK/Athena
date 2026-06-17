@@ -32,6 +32,7 @@ DEFAULT_SETTINGS = {
     "desktopGuiEnabled": True,
     "officialRepositoryUrl": "https://github.com/RewellK/Athena/",
     "projectRoot": ".",
+    "rewriteSettingsOnLoad": False,
     "gitReadOnly": True,
     "selfCodeAwarenessEnabled": True,
     "gitAwarenessEnabled": True,
@@ -74,6 +75,7 @@ DEFAULT_SETTINGS = {
     "llmTeacherInsightStorePath": "logs/llm_teacher_insights.json",
     "selfInsightStorePath": "logs/self_insights.json",
     "moduleProposalStorePath": "logs/module_proposals.json",
+    "userLocationStorePath": "logs/user_location.json",
     "addressUserAs": None,
     "sourcesEnabled": True,
     "allowExternalRequests": True,
@@ -128,7 +130,7 @@ class Settings:
             merged = DEFAULT_SETTINGS.copy()
             merged.update(loaded)
 
-            if merged != loaded:
+            if loaded.get("rewriteSettingsOnLoad", False) and merged != loaded:
                 with open(self.path, "w", encoding="utf-8") as file:
                     json.dump(merged, file, indent=4, ensure_ascii=False)
 

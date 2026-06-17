@@ -133,6 +133,23 @@ class SourceManagerTests(unittest.TestCase):
         finally:
             athena.memory.close()
 
+    def test_athena_suggests_legal_research_connector_without_inventing_jurisprudence(self):
+        athena = make_athena(Path(self.tmp.name))
+        try:
+            response = athena.chat("Athena, busque jurisprudência recente")
+            metadata = athena.last_response_metadata
+
+            self.assertEqual(metadata["route"], "external_information")
+            self.assertEqual(metadata["external_domain"], "legal")
+            self.assertEqual(metadata["source_status"], "missing_source")
+            self.assertEqual(metadata["module_proposal_title"], "LegalResearchConnector")
+            self.assertIn("pesquisa jurídica", response)
+            self.assertIn("proposta de módulo", response)
+            self.assertNotIn("STJ", response)
+            self.assertEqual(metadata["llm_calls"], 0)
+        finally:
+            athena.memory.close()
+
     def test_weather_source_without_location_asks_for_location(self):
         manager = SourceManager(settings=LocalSettings(), registry=SourceRegistry(path=self.registry_path))
 

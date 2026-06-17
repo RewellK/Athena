@@ -16,6 +16,8 @@ from conversation.identity_engine import IdentityEngine
 from language.linguistic_learning_workbench import LinguisticLearningWorkbench
 from language.semantic_frame import SemanticFrameExtractor
 from learning.async_llm_teacher_loop import AsyncLlmTeacherLoop, LlmTeacherInsightStore
+from location.location_manager import LocationManager
+from location.location_store import LocationStore
 from llm.provider import LLMResult
 from memory.database import MemoryDB
 from memory_governance.memory_admin_engine import MemoryAdminEngine
@@ -71,6 +73,7 @@ class FakeSettings:
             "selfInsightStorePath": "",
             "llmTeacherInsightStorePath": "",
             "moduleProposalStorePath": "",
+            "userLocationStorePath": "",
             "addressUserAs": None,
             "asyncLlmTeacherEnabled": False,
             "asyncLlmTeacherAutoProcess": True,
@@ -436,6 +439,7 @@ def make_athena(tmp_path):
         current_user="Rewell",
     )
     athena.research_learning_engine = ResearchLearningEngine(memory=ResearchStrategyMemory())
+    athena.location_manager = LocationManager(store=LocationStore(), settings=settings)
     athena.self_insight_engine = SelfInsightEngine(store=SelfInsightStore())
     athena.async_llm_teacher_loop = AsyncLlmTeacherLoop(
         llm_provider=llm,
@@ -452,7 +456,11 @@ def make_athena(tmp_path):
         teacher_loop=athena.async_llm_teacher_loop,
     )
     athena.memory_governance_engine = MemoryGovernanceEngine(memory)
-    athena.source_manager = SourceManager(settings=settings, research_learning_engine=athena.research_learning_engine)
+    athena.source_manager = SourceManager(
+        settings=settings,
+        research_learning_engine=athena.research_learning_engine,
+        location_manager=athena.location_manager,
+    )
     athena.self_expansion_planner = SelfExpansionPlanner(
         proposal_engine=athena.source_manager.module_proposal_engine
     )
@@ -463,6 +471,7 @@ def make_athena(tmp_path):
         source_manager=athena.source_manager,
         research_learning_engine=athena.research_learning_engine,
         self_insight_engine=athena.self_insight_engine,
+        location_manager=athena.location_manager,
     )
     athena.message_sound_engine = NullSound()
     athena.voice_engine = NullVoice()
@@ -472,6 +481,8 @@ def make_athena(tmp_path):
     athena.pending_knowledge_ingestion = None
     athena.pending_plan = None
     athena.pending_source_proposal = None
+    athena.pending_module_proposal = None
+    athena.pending_location_request = None
     athena.pending_history = []
     athena.last_unknown_interaction = None
     return athena

@@ -78,6 +78,16 @@ class SourceDiscoveryEngine:
             "connector_type": "documentation_stub",
             "freshness_ttl_seconds": 604800,
         },
+        "legal": {
+            "name": "Fonte jurídica configurável",
+            "source_type": "custom_user_source",
+            "url": "",
+            "reason": "Pesquisa jurídica precisa de fonte confiável, jurisdição clara e evidência obrigatória.",
+            "requires_api_key": "unknown",
+            "supports_api": "unknown",
+            "connector_type": "legal_research_stub",
+            "freshness_ttl_seconds": 86400,
+        },
         "general_web": {
             "name": "Fonte web configurável",
             "source_type": "custom_user_source",
@@ -104,6 +114,8 @@ class SourceDiscoveryEngine:
             return "vehicles"
         if words & {"bitcoin", "dolar", "euro", "acao", "acoes", "cotacao", "bolsa", "cripto"}:
             return "finance"
+        if words & {"jurisprudencia", "juridico", "juridica"}:
+            return "legal"
         if words & {"placar", "jogo", "partida", "campeonato", "time"}:
             return "sports"
         if words & {"restaurante", "endereco", "loja", "lugar", "perto", "local"}:

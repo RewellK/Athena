@@ -61,14 +61,19 @@ class CognitiveControlEngine:
         text = " ".join(words)
 
         if "v13" in word_set and word_set & {"pronta", "preparada", "ready"}:
+            operation = "v12_9_readiness" if "pre" in word_set or "pre" in text or "v13" in word_set else "v12_readiness"
             return self._route_result(
                 route="memory_query",
-                intent="v12_readiness",
+                intent=operation,
                 target="v13_readiness",
                 target_type="system",
-                structured_request={"operation": "v12_readiness"},
+                structured_request={"operation": operation},
                 source="local_cognitive_v12_readiness",
             )
+
+        location_admin = self._location_admin_route(_user_input, words, word_set)
+        if location_admin:
+            return location_admin
 
         learning_admin = self._learning_admin_route(words, word_set)
         if learning_admin:
@@ -151,18 +156,57 @@ class CognitiveControlEngine:
             )
         return None
 
+    def _location_admin_route(self, user_input, words, word_set):
+        location_terms = {"localizacao", "localização", "cidade", "local"}
+        if not (word_set & location_terms):
+            return None
+        text = " ".join(words)
+        operation = ""
+        if word_set & {"apague", "apagar", "delete", "remova", "remover"}:
+            operation = "clear_location"
+        elif ("nao" in word_set or "não" in word_set) and word_set & {"salvar", "salve", "guardar", "guarde"}:
+            operation = "deny_location"
+        elif word_set & {"porque", "por", "precisa", "preciso"} and word_set & location_terms:
+            operation = "why_location"
+        elif word_set & {"qual", "quais", "tem", "salva", "salvo", "mostre"}:
+            operation = "location_status"
+        elif "so" in word_set and "agora" in word_set:
+            operation = "one_time_location"
+        elif (
+            "minha localizacao e" in text
+            or "minha localizacao eh" in text
+            or "minha cidade e" in text
+            or "minha cidade eh" in text
+            or ("use" in word_set and word_set & {"padrao", "padrão"})
+            or ("configure" in word_set and word_set & {"cidade", "localizacao", "localização"})
+        ):
+            operation = "set_default_location"
+        if not operation:
+            return None
+        return self._route_result(
+            route="memory_query",
+            intent=operation,
+            target="location",
+            target_type="system",
+            structured_request={"operation": operation, "raw_location_text": user_input},
+            source="local_cognitive_location_admin",
+        )
+
     def _expansion_admin_route(self, words, word_set):
-        if word_set & {"melhorar", "melhoria", "melhorias"}:
+        create_terms = {"crie", "criar", "cria", "proponha", "propor", "registre", "registrar"}
+        if word_set & {"melhorar", "melhoria", "melhorias"} and not (word_set & create_terms):
             return None
         module_terms = {"modulo", "modulos", "módulo", "módulos", "orgao", "orgaos", "órgão", "órgãos"}
         proposal_terms = {"proposta", "propostas"}
         gap_terms = {"lacuna", "lacunas", "falta", "precisa", "necessario", "necessário"}
-        if not (word_set & module_terms or word_set & proposal_terms or word_set & gap_terms):
+        if not (word_set & module_terms or word_set & proposal_terms or word_set & gap_terms or word_set & create_terms):
             return None
 
         operation = ""
         identifier = ""
-        if word_set & {"aprovar", "aprova", "aprove"} and word_set & proposal_terms:
+        if word_set & create_terms and (word_set & proposal_terms or word_set & module_terms or word_set & {"melhoria", "melhorias"}):
+            operation = "create_module_proposal"
+        elif word_set & {"aprovar", "aprova", "aprove"} and word_set & proposal_terms:
             operation = "approve_module_proposal"
             identifier = words[-1] if words else ""
         elif word_set & {"rejeitar", "rejeita", "rejeite"} and word_set & proposal_terms:
@@ -458,11 +502,15 @@ class CognitiveControlEngine:
             "carro",
             "veiculo",
             "veiculos",
+            "jurisprudencia",
+            "juridico",
+            "juridica",
         }
         if not (word_set & external_terms):
             return None
         price_terms = {"preco", "valor", "custa", "custaria", "cotacao"}
-        if not self._looks_like_question(words) and not (word_set & price_terms):
+        research_verbs = {"busque", "buscar", "pesquise", "pesquisar", "consulte", "consulta", "procure", "procurar"}
+        if not self._looks_like_question(words) and not (word_set & price_terms) and not (word_set & research_verbs):
             return None
         domain = self._external_domain(words)
         target = self._external_domain_label(domain)
@@ -675,6 +723,8 @@ class CognitiveControlEngine:
             return "vehicles"
         if word_set & {"bitcoin", "dolar", "euro", "acao", "acoes", "cotacao", "bolsa", "cripto"}:
             return "finance"
+        if word_set & {"jurisprudencia", "juridico", "juridica"}:
+            return "legal"
         return "unknown_external"
 
     def _external_domain_label(self, domain):
@@ -683,6 +733,7 @@ class CognitiveControlEngine:
             "news": "noticias",
             "vehicles": "veiculos",
             "finance": "cotacao",
+            "legal": "pesquisa juridica",
             "unknown_external": "informacao externa atual",
         }.get(domain, "informacao externa atual")
 

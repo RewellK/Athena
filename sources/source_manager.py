@@ -23,6 +23,7 @@ class SourceManager:
         "news": "notícias",
         "vehicles": "veículos",
         "finance": "finanças/cotação",
+        "legal": "pesquisa jurídica",
         "sports": "esportes",
         "places": "lugares",
         "documentation": "documentação",
@@ -44,6 +45,7 @@ class SourceManager:
         research_learning_engine=None,
         capability_gap_engine=None,
         module_proposal_engine=None,
+        location_manager=None,
         logger=None,
     ):
         self.settings = settings
@@ -77,6 +79,7 @@ class SourceManager:
         self.research_learning_engine = research_learning_engine or ResearchLearningEngine(
             memory=ResearchStrategyMemory(path=self._setting("researchStrategyStorePath", "logs/research_strategies.json"))
         )
+        self.location_manager = location_manager
         self._bootstrap_configured_sources()
 
     def domain_for(self, text, requested_tool=""):
@@ -132,20 +135,17 @@ class SourceManager:
         request = self._external_request(domain, query)
         if domain == "weather" and not request.get("location"):
             strategy = self._observe_research_result(domain, source, None, "missing_input")
-            gap = self._detect_gap(domain, "missing_location", query, source=source)
+            missing_status = "missing_geocoder" if request.get("location_status") == "known_without_coordinates" else "missing_location"
+            gap = self._detect_gap(domain, missing_status, query, source=source)
             module_proposal = self._module_proposal_for_gap(gap, {}, query)
             return self._result(
-                "missing_location",
+                missing_status,
                 domain,
                 source=source,
                 capability_gap=gap,
                 module_proposal=module_proposal,
                 research_strategy=strategy,
-                response=(
-                    "Ainda não possuo uma localização padrão para clima. "
-                    "Para consultar clima, preciso de uma cidade com latitude/longitude configurada "
-                    "ou de um geocoder habilitado."
-                ),
+                response=self._missing_weather_location_response(request, module_proposal),
                 started_at=started_at,
             )
 
@@ -192,16 +192,21 @@ class SourceManager:
 
     def missing_source_response(self, domain, proposal):
         label = self.domain_label(domain)
-        module_title = self.module_proposal_engine.propose_for_gap(
+        module_proposal = self.module_proposal_engine.propose_for_gap(
             {"domain": domain, "gap_type": "missing_source", "reason": f"Sem fonte validada para {label}."},
             proposal.to_dict() if hasattr(proposal, "to_dict") else proposal,
-        ).get("title", "módulo futuro")
+        )
+        existing = self.module_proposal_engine.find_existing(module_proposal)
+        module_title = module_proposal.get("title", "módulo futuro")
+        existing_text = ""
+        if existing and existing.get("status") in {"proposed", "pending_human_review", "approved"}:
+            existing_text = f" Já existe uma proposta registrada para {existing.get('title')} com status {existing.get('status')}."
         return (
             f"Ainda não possuo uma fonte validada para {label}. "
             f"Não sei consultar {label} ainda porque não tenho uma fonte validada para esse domínio. "
             f"Encontrei uma possível fonte: {proposal.name}. "
             f"Também percebi uma lacuna de módulo/conector e posso registrar uma proposta: {module_title}. "
-            f"Posso adicionar a fonte candidata e criar essa proposta de módulo para {label}? "
+            f"Posso adicionar a fonte candidata e criar essa proposta de módulo para {label}?{existing_text} "
             "Ambas ficarão pendentes de validação humana e não serão usadas como evidência por enquanto."
         )
 
@@ -272,7 +277,11 @@ class SourceManager:
             return {}
         location = self._weather_location()
         if not location:
-            return {"date_mode": self._weather_date_mode(query), "language": "pt-BR"}
+            return {
+                "date_mode": self._weather_date_mode(query),
+                "language": "pt-BR",
+                "location_status": self._weather_location_status(),
+            }
         return {
             "date_mode": self._weather_date_mode(query),
             "language": "pt-BR",
@@ -280,6 +289,11 @@ class SourceManager:
         }
 
     def _weather_location(self):
+        manager = getattr(self, "location_manager", None)
+        if manager and hasattr(manager, "weather_location"):
+            location = manager.weather_location()
+            if location:
+                return location
         location = self._setting("weatherDefaultLocation", {}) or {}
         try:
             latitude = float(location.get("latitude"))
@@ -298,6 +312,30 @@ class SourceManager:
             "longitude": longitude,
             "name": ", ".join(parts) or "localização configurada",
         }
+
+    def _weather_location_status(self):
+        manager = getattr(self, "location_manager", None)
+        if manager and hasattr(manager, "current"):
+            location = manager.current()
+            if location and location.get("consent_status") == "granted":
+                return "known_without_coordinates"
+            if location and location.get("consent_status") == "denied":
+                return "denied"
+        return "missing"
+
+    def _missing_weather_location_response(self, request, module_proposal=None):
+        manager = getattr(self, "location_manager", None)
+        if manager and hasattr(manager, "weather_missing_response"):
+            response = manager.weather_missing_response()
+        else:
+            response = (
+                "Ainda não possuo uma localização padrão para clima. "
+                "Para consultar clima, preciso de uma cidade com latitude/longitude configurada "
+                "ou de um geocoder habilitado."
+            )
+        if request.get("location_status") == "known_without_coordinates" and module_proposal:
+            response += f"\nProposta sugerida: {module_proposal.get('title')} ({module_proposal.get('status')})."
+        return response
 
     def _weather_date_mode(self, query):
         normalized = str(query or "").lower()

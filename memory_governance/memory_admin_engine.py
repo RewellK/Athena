@@ -9,6 +9,7 @@ class MemoryAdminEngine:
         source_manager=None,
         research_learning_engine=None,
         self_insight_engine=None,
+        location_manager=None,
     ):
         self.memory = memory
         self.governance_engine = governance_engine
@@ -16,6 +17,7 @@ class MemoryAdminEngine:
         self.source_manager = source_manager
         self.research_learning_engine = research_learning_engine
         self.self_insight_engine = self_insight_engine
+        self.location_manager = location_manager
 
     def respond(self, request=None, user_input=""):
         request = dict(request or {})
@@ -34,6 +36,12 @@ class MemoryAdminEngine:
             return self._research_strategies()
         if operation == "v12_readiness":
             return self._v12_readiness()
+        if operation == "v12_9_readiness":
+            return self._v12_9_readiness()
+        if operation in {"location_status", "clear_location", "deny_location", "why_location", "set_location", "set_default_location", "one_time_location"}:
+            if not self.location_manager:
+                return "Ainda não tenho LocationManager conectado."
+            return self.location_manager.respond(operation, user_input=user_input)
         return self._summary()
 
     def _summary(self):
@@ -135,5 +143,23 @@ class MemoryAdminEngine:
         for name, passed in checks.items():
             lines.append(f"- {name}: {'ok' if passed else 'pendente'}")
         verdict = "parcialmente pronta para iniciar V13-pre" if ready else "ainda não pronta para V13-pre"
+        lines.append(f"Conclusão local: Athena está {verdict}.")
+        return "\n".join(lines)
+
+    def _v12_9_readiness(self):
+        checks = {
+            "LocationManager com consentimento": bool(self.location_manager),
+            "SelfInsight deduplicável": bool(self.self_insight_engine),
+            "ModuleProposal deduplicável": bool(getattr(self.source_manager, "module_proposal_engine", None)),
+            "SourceManager/EvidenceEngine": bool(self.source_manager),
+            "Memory/WorldModel consultáveis": bool(self.memory),
+            "ResearchLearning": bool(self.research_learning_engine),
+            "Reflection com revisão humana": bool(self.reflection_engine),
+        }
+        ready = all(checks.values())
+        lines = ["Gate V12.9 para V13-pre:"]
+        for name, passed in checks.items():
+            lines.append(f"- {name}: {'ok' if passed else 'pendente'}")
+        verdict = "agora sim, pronta para iniciar V13-pre" if ready else "ainda não pronta para V13-pre"
         lines.append(f"Conclusão local: Athena está {verdict}.")
         return "\n".join(lines)
