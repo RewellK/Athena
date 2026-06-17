@@ -6,14 +6,20 @@ from pathlib import Path
 from agency.tool_registry import ToolRegistry
 from bootstrap import AthenaBootstrap
 from brain.orchestrator import Athena
+from capabilities.self_expansion_planner import SelfExpansionPlanner
 from conversation.conversation_context import ConversationContext
 from conversation.conversation_engine import ConversationEngine
 from conversation.conversation_metrics import ConversationMetrics
 from conversation.conversation_router import ConversationRouter
 from conversation.capability_engine import CapabilityEngine
 from conversation.identity_engine import IdentityEngine
+from language.linguistic_learning_workbench import LinguisticLearningWorkbench
+from language.semantic_frame import SemanticFrameExtractor
+from learning.async_llm_teacher_loop import AsyncLlmTeacherLoop, LlmTeacherInsightStore
 from llm.provider import LLMResult
 from memory.database import MemoryDB
+from memory_governance.memory_admin_engine import MemoryAdminEngine
+from memory_governance.memory_governance_engine import MemoryGovernanceEngine
 from memory_interpreter import MemoryInterpreter
 from memory_manager.memory_manager import MemoryManager
 from relevance.consolidation_planner import ConsolidationPlanner
@@ -22,7 +28,11 @@ from relevance.relevance_engine import RelevanceEngine
 from reasoning.reasoning_engine import ReasoningEngine
 from reflection.reflection_engine import ReflectionEngine
 from reflection.reflection_store import ReflectionStore
+from research.research_learning_engine import ResearchLearningEngine
+from research.research_strategy_memory import ResearchStrategyMemory
 from self_model.self_model import SelfModel
+from learning.learning_interface import LearningInterface
+from learning.self_insight_engine import SelfInsightEngine, SelfInsightStore
 from sources.source_manager import SourceManager
 from world_model.world_model import WorldModel
 from core.context_builder import ContextBuilder
@@ -56,6 +66,17 @@ class FakeSettings:
             "requireConfirmationForNewSources": True,
             "sourceRegistryPath": "",
             "evidenceStorePath": "",
+            "researchStrategyStorePath": "",
+            "linguisticLearningStorePath": "",
+            "selfInsightStorePath": "",
+            "llmTeacherInsightStorePath": "",
+            "moduleProposalStorePath": "",
+            "addressUserAs": None,
+            "asyncLlmTeacherEnabled": False,
+            "asyncLlmTeacherAutoProcess": True,
+            "asyncLlmTeacherTimeoutSeconds": 12,
+            "useSpacyLinguisticAnalyzer": False,
+            "spacyModelName": "pt_core_news_sm",
             "externalResearchAsyncEnabled": True,
             "externalResearchTimeoutSeconds": 15,
             "externalResearchProcessInline": True,
@@ -409,7 +430,40 @@ def make_athena(tmp_path):
     athena.conversation_engine = ConversationEngine(identity, llm, context_builder, health_engine=None, logger=logger, settings=settings)
     athena.identity_engine = IdentityEngine(identity, athena.self_model)
     athena.capability_engine = CapabilityEngine(settings=settings)
-    athena.source_manager = SourceManager(settings=settings)
+    athena.linguistic_learning_workbench = LinguisticLearningWorkbench()
+    athena.semantic_frame_extractor = SemanticFrameExtractor(
+        workbench=athena.linguistic_learning_workbench,
+        current_user="Rewell",
+    )
+    athena.research_learning_engine = ResearchLearningEngine(memory=ResearchStrategyMemory())
+    athena.self_insight_engine = SelfInsightEngine(store=SelfInsightStore())
+    athena.async_llm_teacher_loop = AsyncLlmTeacherLoop(
+        llm_provider=llm,
+        store=LlmTeacherInsightStore(),
+        workbench=athena.linguistic_learning_workbench,
+        self_insight_engine=athena.self_insight_engine,
+        research_learning_engine=athena.research_learning_engine,
+        settings=settings,
+        logger=logger,
+    )
+    athena.learning_interface = LearningInterface(
+        workbench=athena.linguistic_learning_workbench,
+        self_insight_engine=athena.self_insight_engine,
+        teacher_loop=athena.async_llm_teacher_loop,
+    )
+    athena.memory_governance_engine = MemoryGovernanceEngine(memory)
+    athena.source_manager = SourceManager(settings=settings, research_learning_engine=athena.research_learning_engine)
+    athena.self_expansion_planner = SelfExpansionPlanner(
+        proposal_engine=athena.source_manager.module_proposal_engine
+    )
+    athena.memory_admin_engine = MemoryAdminEngine(
+        memory=memory,
+        governance_engine=athena.memory_governance_engine,
+        reflection_engine=athena.reflection_engine,
+        source_manager=athena.source_manager,
+        research_learning_engine=athena.research_learning_engine,
+        self_insight_engine=athena.self_insight_engine,
+    )
     athena.message_sound_engine = NullSound()
     athena.voice_engine = NullVoice()
     athena.conversation_metrics = ConversationMetrics(path=str(tmp_path / "logs" / "conversation_metrics.jsonl"), logger=logger)

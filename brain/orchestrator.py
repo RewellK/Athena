@@ -9,6 +9,8 @@ from agency.goal_engine import GoalEngine
 from agency.intention_engine import IntentionEngine
 from agency.proactivity_engine import ProactivityEngine
 from agency.tool_registry import ToolRegistry
+from background_tasks.task_runner import BackgroundTaskRunner
+from capabilities.self_expansion_planner import SelfExpansionPlanner
 from bootstrap import AthenaBootstrap
 from core.context_builder import ContextBuilder
 from core.logger import AthenaLogger
@@ -27,9 +29,17 @@ from forgetting_engine import ForgettingEngine
 from git_awareness.git_awareness_engine import GitAwarenessEngine
 from health.health_engine import HealthEngine
 from knowledge_sources.knowledge_ingestion_engine import KnowledgeIngestionEngine
+from language.linguistic_learning_workbench import LinguisticLearningWorkbench
+from language.optional_spacy_analyzer import OptionalSpacyAnalyzer
+from language.semantic_frame import SemanticFrameExtractor
+from learning.async_llm_teacher_loop import AsyncLlmTeacherLoop, LlmTeacherInsightStore
 from learning.learning_engine import LearningEngine
+from learning.learning_interface import LearningInterface
+from learning.self_insight_engine import SelfInsightEngine, SelfInsightStore
 from llm.provider import OllamaProvider
 from memory.database import MemoryDB
+from memory_governance.memory_admin_engine import MemoryAdminEngine
+from memory_governance.memory_governance_engine import MemoryGovernanceEngine
 from memory_interpreter import MemoryInterpreter
 from memory_manager.memory_manager import MemoryManager
 from relevance.consolidation_planner import ConsolidationPlanner
@@ -37,6 +47,8 @@ from relevance.follow_up_question_engine import FollowUpQuestionEngine
 from relevance.relevance_engine import RelevanceEngine
 from reasoning.reasoning_engine import ReasoningEngine
 from reflection.reflection_engine import ReflectionEngine
+from research.research_learning_engine import ResearchLearningEngine
+from research.research_strategy_memory import ResearchStrategyMemory
 from self_model.self_model import SelfModel
 from self_code_awareness.self_code_awareness_engine import SelfCodeAwarenessEngine
 from sources.source_manager import SourceManager
@@ -129,6 +141,41 @@ class Athena:
         self.message_sound_engine = MessageSoundEngine(self.settings, self.logger)
         self.conversation_metrics = ConversationMetrics(logger=self.logger)
         self.last_response_metadata = {}
+        self.linguistic_learning_workbench = LinguisticLearningWorkbench(
+            path=self.settings.get("linguisticLearningStorePath", "logs/linguistic_training.json")
+        )
+        self.semantic_frame_extractor = SemanticFrameExtractor(
+            workbench=self.linguistic_learning_workbench,
+            current_user=self.creator_name,
+            spacy_analyzer=OptionalSpacyAnalyzer(self.settings.get("spacyModelName", "pt_core_news_sm"))
+            if self.settings.get("useSpacyLinguisticAnalyzer", False)
+            else None,
+        )
+        self.research_learning_engine = ResearchLearningEngine(
+            memory=ResearchStrategyMemory(path=self.settings.get("researchStrategyStorePath", "logs/research_strategies.json"))
+        )
+        self.self_insight_engine = SelfInsightEngine(
+            store=SelfInsightStore(path=self.settings.get("selfInsightStorePath", "logs/self_insights.json"))
+        )
+        self.background_task_runner = (
+            BackgroundTaskRunner(self.logger) if self.settings.get("asyncLlmTeacherEnabled", False) else None
+        )
+        self.async_llm_teacher_loop = AsyncLlmTeacherLoop(
+            llm_provider=self.llm_provider,
+            store=LlmTeacherInsightStore(path=self.settings.get("llmTeacherInsightStorePath", "logs/llm_teacher_insights.json")),
+            workbench=self.linguistic_learning_workbench,
+            self_insight_engine=self.self_insight_engine,
+            research_learning_engine=self.research_learning_engine,
+            task_runner=self.background_task_runner,
+            settings=self.settings,
+            logger=self.logger,
+        )
+        self.learning_interface = LearningInterface(
+            workbench=self.linguistic_learning_workbench,
+            self_insight_engine=self.self_insight_engine,
+            teacher_loop=self.async_llm_teacher_loop,
+        )
+        self.memory_governance_engine = MemoryGovernanceEngine(self.memory)
 
         self.health_engine = HealthEngine(
             memory=self.memory,
@@ -163,7 +210,22 @@ class Athena:
             settings=self.settings,
         )
         self.self_status_engine = SelfStatusEngine(self.health_engine, self.error_capture)
-        self.source_manager = SourceManager(settings=self.settings, logger=self.logger)
+        self.source_manager = SourceManager(
+            settings=self.settings,
+            logger=self.logger,
+            research_learning_engine=self.research_learning_engine,
+        )
+        self.self_expansion_planner = SelfExpansionPlanner(
+            proposal_engine=self.source_manager.module_proposal_engine
+        )
+        self.memory_admin_engine = MemoryAdminEngine(
+            memory=self.memory,
+            governance_engine=self.memory_governance_engine,
+            reflection_engine=self.reflection_engine,
+            source_manager=self.source_manager,
+            research_learning_engine=self.research_learning_engine,
+            self_insight_engine=self.self_insight_engine,
+        )
 
         self.pending_world_extraction = None
         self.pending_knowledge_ingestion = None
@@ -182,6 +244,7 @@ class Athena:
         started_at = self.conversation_metrics.start()
         self.message_sound_engine.play_received()
         self.conversation_context.add_user_message(user_input)
+        semantic_frame = self._semantic_frame(user_input)
         self._expire_pending_confirmations()
         had_pending_before = self._has_pending_confirmation()
         llm_calls_before = self._llm_call_count()
@@ -249,6 +312,15 @@ class Athena:
             "pending_confirmation": self._pending_state().get("pending_type"),
             "required_tool": route_result.get("tool_name") if route_result.get("requires_tool") else None,
             "tool_available": False,
+            "used_research_strategy": False,
+            "research_strategy_used": "",
+            "llm_avoided_reason": "",
+            "semantic_frame": semantic_frame,
+            "semantic_subject": semantic_frame.get("subject", ""),
+            "semantic_verb": semantic_frame.get("verb", ""),
+            "semantic_object": semantic_frame.get("object", ""),
+            "semantic_intent": semantic_frame.get("intent", ""),
+            "semantic_target": semantic_frame.get("target", ""),
         }
 
         pending_response = self._handle_pending(intention, user_input)
@@ -424,7 +496,7 @@ class Athena:
             return self._handle_error_awareness_route(intention)
 
         if route == "memory_query":
-            return self.reflection_engine.respond(user_input)
+            return self._handle_memory_admin_route(intention, user_input, metadata)
 
         if route == "world_query":
             metadata["used_world_model"] = True
@@ -498,6 +570,19 @@ class Athena:
         for char in normalized:
             chars.append(char if char.isalnum() else " ")
         return " ".join("".join(chars).split())
+
+    def _semantic_frame(self, user_input):
+        extractor = getattr(self, "semantic_frame_extractor", None)
+        if not extractor:
+            return {}
+        try:
+            return extractor.extract(
+                user_input,
+                context={"recent_entities": self.conversation_context.recent_entities(limit=8)},
+            ).to_dict()
+        except Exception as error:
+            self.handle_exception(error, {"module": "language/semantic_frame.py", "operation": "extract"})
+            return {}
 
     def _handle_question_about_user(self, intention, user_input, metadata=None):
         target = str(intention.get("target") or "").strip()
@@ -701,6 +786,24 @@ Fatos estruturados:
                 metadata["tool_available"] = result.get("status") in {"job_created", "completed"}
                 metadata["used_source"] = result.get("status") == "completed"
                 metadata["source_id"] = (result.get("source") or {}).get("source_id")
+                gap = result.get("capability_gap") or {}
+                module_proposal = result.get("module_proposal") or {}
+                if gap:
+                    metadata["capability_gap_type"] = gap.get("gap_type")
+                    metadata["capability_gap_domain"] = gap.get("domain")
+                if module_proposal:
+                    metadata["module_proposal_title"] = module_proposal.get("title")
+                    metadata["module_proposal_status"] = module_proposal.get("status")
+                    metadata["module_proposal_id"] = module_proposal.get("proposal_id")
+                    insight_engine = getattr(self, "self_insight_engine", None)
+                    if insight_engine and hasattr(insight_engine, "create_from_capability_gap"):
+                        insight_engine.create_from_capability_gap(gap, module_proposal=module_proposal)
+                strategy = result.get("research_strategy") or {}
+                if strategy:
+                    metadata["used_research_strategy"] = True
+                    metadata["research_strategy_used"] = strategy.get("domain")
+                    metadata["research_strategy_status"] = strategy.get("status")
+                    metadata["research_strategy_source"] = strategy.get("preferred_source") or ",".join(strategy.get("candidate_sources") or [])
                 evidence = (result.get("job") or {}).get("evidence") or {}
                 metadata["evidence_id"] = evidence.get("evidence_id")
                 metadata["evidence_valid_until"] = evidence.get("valid_until")
@@ -712,6 +815,7 @@ Fatos estruturados:
                         "source_candidate_approval",
                         f"Adicionar {proposal.get('name')} como fonte candidata para {source_manager.domain_label(result.get('domain'))}",
                         proposal=proposal,
+                        module_proposal=module_proposal,
                     )
                 if result.get("job"):
                     metadata["external_research_job_id"] = result["job"].get("job_id")
@@ -767,6 +871,65 @@ Fatos estruturados:
             return self.git_awareness_engine.respond(git_request)
 
         return self.self_status_engine.respond()
+
+    def _handle_memory_admin_route(self, intention, user_input, metadata=None):
+        metadata = metadata if isinstance(metadata, dict) else {}
+        request = self._structured_request(intention)
+        operation = request.get("operation") or intention.get("intent")
+
+        if operation == "memory_about_entity":
+            metadata["used_memory"] = True
+            metadata["used_world_model"] = True
+            target = str(intention.get("target") or request.get("target") or "").strip()
+            if target:
+                remember = getattr(self.conversation_context, "remember_entity", None)
+                if callable(remember):
+                    remember(target, entity_type="unknown", source="memory_admin")
+                response = self._describe_entity_from_memory(target, user_input=user_input)
+                return response or f"Ainda não tenho memórias consolidadas sobre {target}."
+            return "Ainda preciso de um alvo para consultar minhas memórias."
+
+        if operation in {"source_admin", "pending_sources"}:
+            metadata["source_lookup_ms"] = 0
+            status = "pending_validation" if operation == "pending_sources" else request.get("status")
+            return self.memory_admin_engine.respond({"operation": "source_admin", "status": status}, user_input=user_input)
+
+        if operation == "research_admin":
+            metadata["used_research_strategy"] = True
+            return self.memory_admin_engine.respond({"operation": "research_admin"}, user_input=user_input)
+
+        if operation == "v12_readiness":
+            return self.memory_admin_engine.respond({"operation": "v12_readiness"}, user_input=user_input)
+
+        if operation in {"pending_memories", "important_memories", "stale_memories", "improvement_memories"}:
+            metadata["used_memory"] = True
+            return self.memory_admin_engine.respond({"operation": operation}, user_input=user_input)
+
+        if operation in {
+            "pending_training_examples",
+            "learned_linguistic_patterns",
+            "pending_self_insights",
+            "llm_teacher_insights",
+            "local_patterns_without_llm",
+            "llm_dependencies",
+            "create_training_example_from_correction",
+            "approve_training_example",
+            "reject_training_example",
+            "approve_self_insight",
+            "reject_self_insight",
+        }:
+            return self.learning_interface.respond(operation, identifier=request.get("identifier"), user_input=user_input)
+
+        if operation in {
+            "module_proposals",
+            "pending_module_proposals",
+            "capability_gaps",
+            "approve_module_proposal",
+            "reject_module_proposal",
+        }:
+            return self.self_expansion_planner.respond(operation, identifier=request.get("identifier"))
+
+        return self.memory_admin_engine.respond(request, user_input=user_input)
 
     def _handle_capability_route(self, intention):
         request = self._structured_request(intention)
@@ -1382,16 +1545,32 @@ Resultado estruturado do Core:
                 source = result.get("source", {})
                 validation = result.get("validation", {})
                 domain_label = self.source_manager.domain_label(source.get("domain"))
+                module_proposal = {}
+                if pending.get("module_proposal"):
+                    module_proposal = self.source_manager.register_module_proposal(pending["module_proposal"])
+                    insight_engine = getattr(self, "self_insight_engine", None)
+                    if insight_engine and hasattr(insight_engine, "create_from_capability_gap"):
+                        insight_engine.create_from_capability_gap(
+                            {"domain": source.get("domain"), "gap_type": "missing_module"},
+                            module_proposal=module_proposal,
+                        )
+                module_text = ""
+                if module_proposal:
+                    module_text = (
+                        f"\nTambém registrei a proposta de módulo {module_proposal.get('title')} "
+                        f"com status {module_proposal.get('status')}. Ela não implementa código automaticamente."
+                    )
                 return (
                     f"Certo. Adicionei {source.get('name')} como fonte candidata para {domain_label}. "
                     f"Status: {source.get('status')}. Validação: {source.get('validation_status')}.\n"
                     "Ela continua desativada e não será usada como evidência até passar por validação e nova aprovação humana."
+                    f"{module_text}"
                 )
             if intention_type == "rejection":
                 pending = self.pending_source_proposal
                 self._set_pending_status(pending, "rejected")
                 self.pending_source_proposal = None
-                return "Tudo bem. Não registrei essa fonte candidata."
+                return "Tudo bem. Não registrei essa fonte candidata nem a proposta de módulo associada."
             if self.settings.get("pendingConfirmationBlocksConversation", False):
                 return "Ainda preciso saber se você autoriza adicionar a fonte candidata."
             return None
@@ -1819,10 +1998,18 @@ Mensagem do usuário:
             metadata["used_llm"] = bool(metadata.get("used_llm") or metadata["llm_calls"] > 0)
         else:
             metadata["llm_call_count"] = metadata.get("llm_calls", 0)
+        if not metadata.get("llm_calls") and not metadata.get("llm_avoided_reason"):
+            if metadata.get("used_memory") or metadata.get("used_world_model"):
+                metadata["llm_avoided_reason"] = "local_memory_or_world_model"
+            elif metadata.get("used_source"):
+                metadata["llm_avoided_reason"] = "validated_source_with_evidence"
+            elif str(metadata.get("route_source", "")).startswith("local_"):
+                metadata["llm_avoided_reason"] = "local_cognitive_control"
         metadata["pending_confirmation"] = self._pending_state().get("pending_type")
         metadata["response_ms"] = int((time.perf_counter() - started_at) * 1000)
         final_metadata = self.conversation_metrics.finish(started_at, user_input, metadata)
         self._observe_turn_reflection(user_input, response_text, final_metadata, route_result)
+        self._enqueue_llm_teacher_turn(user_input, response_text, final_metadata)
         self.last_response_metadata = final_metadata
 
         if self.settings.get("showRouteMetadata", False):
@@ -1852,15 +2039,38 @@ Mensagem do usuário:
                 metadata=metadata,
                 route_result=route_result,
             )
+            workbench = getattr(self, "linguistic_learning_workbench", None)
+            insight_engine = getattr(self, "self_insight_engine", None)
+            for event in events or []:
+                if workbench and hasattr(workbench, "example_from_reflection_event"):
+                    workbench.example_from_reflection_event(event)
+                if insight_engine and hasattr(insight_engine, "create_from_reflection_event"):
+                    insight_engine.create_from_reflection_event(event)
         except Exception as error:
             self.handle_exception(error, {"module": "reflection/reflection_engine.py", "operation": "observe_turn"})
             events = []
         metadata["reflection_ms"] = int((time.perf_counter() - started_at) * 1000)
         metadata["reflection_events"] = len(events)
         metadata["reflection_queue_size"] = 0
-        metadata["async_jobs_pending"] = 0
-        metadata["async_jobs_processed"] = len(events)
+        metadata.setdefault("async_jobs_pending", 0)
+        metadata.setdefault("async_jobs_processed", 0)
         return events
+
+    def _enqueue_llm_teacher_turn(self, user_input, response_text, metadata):
+        teacher = getattr(self, "async_llm_teacher_loop", None)
+        if not teacher or not hasattr(teacher, "enqueue_turn"):
+            return None
+        settings = getattr(self, "settings", None)
+        if settings and hasattr(settings, "get") and not settings.get("asyncLlmTeacherEnabled", False):
+            return None
+        try:
+            turn = teacher.enqueue_turn(user_input, response_text, metadata=metadata)
+            metadata["llm_teacher_pending"] = teacher.pending_count()
+            return turn
+        except Exception as error:
+            self.handle_exception(error, {"module": "learning/async_llm_teacher_loop.py", "operation": "enqueue_turn"})
+            metadata["llm_teacher_error"] = str(error)
+            return None
 
     def _speak(self, response):
         try:

@@ -103,6 +103,9 @@ Evidências:
             self._detect_recent_entity_resolution_failure,
             self._detect_llm_overuse,
             self._detect_tool_hallucination,
+            self._detect_source_governance_issues,
+            self._detect_research_strategy_issues,
+            self._detect_memory_governance_issues,
             self._detect_external_answer_without_validated_source,
             self._detect_weather_source_issues,
             self._detect_pending_confirmation_block,
@@ -201,6 +204,189 @@ Evidências:
                 suggestion="Registrar a entrada desconhecida, explicar a ambiguidade e criar uma rota local se o padrao for recorrente.",
                 suggested_tests=[
                     "Uma entrada desconhecida deve registrar a falha e a pergunta 'o que voce nao entendeu?' nao deve repetir o mesmo fallback."
+                ],
+            )
+        return None
+
+    def _detect_source_governance_issues(self, user_message, athena_response, metadata):
+        if self._route(metadata) != "external_information":
+            return None
+        status = str(metadata.get("source_status") or "")
+        if status == "missing_source":
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="source_missing",
+                severity="low",
+                suspected_module="SourceRegistry/SourceDiscoveryEngine",
+                explanation="A Athena identificou informacao externa, mas nao encontrou fonte enabled para o dominio.",
+                suggestion="Registrar estrategia needs_source, sugerir fonte candidata e aguardar aprovacao humana.",
+                suggested_tests=[
+                    "Dominio externo sem fonte enabled deve sugerir candidata sem dizer que pesquisou."
+                ],
+            )
+        if status == "source_failure":
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="source_failure",
+                severity="medium",
+                suspected_module="ExternalResearchWorker/Connector",
+                explanation="Uma fonte externa falhou durante a consulta.",
+                suggestion="Registrar falha no job, reduzir confianca da estrategia e responder sem inventar.",
+                suggested_tests=[
+                    "Falha de fonte externa deve manter evidence_id vazio e resposta honesta."
+                ],
+            )
+        if metadata.get("external_research_job_status") == "failed":
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="async_job_failed",
+                severity="medium",
+                suspected_module="AsyncExternalResearchWorker",
+                explanation="Um job externo terminou como failed.",
+                suggestion="Expor erro operacional em metadata e criar teste de fallback sem travar Athena.chat().",
+                suggested_tests=[
+                    "Job externo failed deve voltar resposta util e nao bloquear o Core."
+                ],
+            )
+        if status in {"candidate", "pending_validation"} and metadata.get("evidence_id"):
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="source_candidate_used_as_fact",
+                severity="high",
+                suspected_module="SourceManager/EvidenceEngine",
+                explanation="Uma fonte nao enabled parece ter gerado evidência factual.",
+                suggestion="Bloquear EvidenceRecord para candidate/pending_validation.",
+                suggested_tests=[
+                    "Fonte candidate ou pending_validation nao deve gerar EvidenceRecord confiavel."
+                ],
+            )
+        if metadata.get("source_validation_status") not in {None, "", "passed"} and metadata.get("evidence_id"):
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="source_validation_bypassed",
+                severity="high",
+                suspected_module="SourceValidator/EvidenceEngine",
+                explanation="Uma evidência foi criada sem validação passed.",
+                suggestion="Exigir validation_status=passed antes de EvidenceRecord.",
+                suggested_tests=[
+                    "Fonte sem validation_status passed deve recusar resposta factual externa."
+                ],
+            )
+        return None
+
+    def _detect_research_strategy_issues(self, user_message, athena_response, metadata):
+        route = self._route(metadata)
+        if route != "external_information":
+            if metadata.get("used_research_strategy") and self._int(metadata.get("llm_calls")) > 0:
+                return self._event(
+                    user_message,
+                    athena_response,
+                    metadata,
+                    issue_type="llm_used_when_strategy_exists",
+                    severity="medium",
+                    suspected_module="ResearchLearningEngine/ConversationRouter",
+                    explanation="A Athena tinha estrategia de pesquisa local, mas ainda usou LLM.",
+                    suggestion="Consultar ResearchStrategyMemory antes de pedir auxilio linguistico/LLM.",
+                    suggested_tests=[
+                        "Com estrategia ativa para dominio conhecido, rota simples deve manter llm_calls=0."
+                    ],
+                )
+            return None
+        if metadata.get("external_domain") and not metadata.get("used_research_strategy"):
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="research_strategy_missing",
+                severity="low",
+                suspected_module="ResearchLearningEngine",
+                explanation="Uma consulta externa ocorreu sem estrategia procedural registrada no metadata.",
+                suggestion="Registrar ou recuperar ResearchStrategy para cada dominio externo.",
+                suggested_tests=[
+                    "Consulta externa deve preencher research_strategy_used ou registrar needs_source."
+                ],
+            )
+        if metadata.get("used_research_strategy") and self._int(metadata.get("llm_calls")) > 0:
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="llm_used_when_strategy_exists",
+                severity="medium",
+                suspected_module="ResearchLearningEngine/SourceManager",
+                explanation="A Athena usou LLM mesmo tendo estrategia de pesquisa local.",
+                suggestion="Usar a estrategia local antes de acionar LLM.",
+                suggested_tests=[
+                    "Estrategia ativa deve reduzir chamadas LLM para dominio externo conhecido."
+                ],
+            )
+        return None
+
+    def _detect_memory_governance_issues(self, user_message, athena_response, metadata):
+        if metadata.get("memory_candidate_pending"):
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="memory_candidate_not_consolidated",
+                severity="low",
+                suspected_module="MemoryGovernanceEngine",
+                explanation="Existe candidato de memoria aguardando consolidacao ou confirmacao.",
+                suggestion="Listar pendencias e pedir revisao humana antes de promover ou arquivar.",
+                suggested_tests=[
+                    "Memoria candidata antiga deve aparecer em MemoryGovernance como pending/stale."
+                ],
+            )
+        if metadata.get("memory_duplication_detected"):
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="memory_duplication_detected",
+                severity="low",
+                suspected_module="MemoryCleanupEngine",
+                explanation="A governanca sinalizou possivel duplicata de memoria.",
+                suggestion="Sugerir consolidacao sem apagar automaticamente.",
+                suggested_tests=[
+                    "Duplicata de memoria deve gerar sugestao de limpeza, nao delecao automatica."
+                ],
+            )
+        if metadata.get("memory_stale_detected"):
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="memory_stale_detected",
+                severity="low",
+                suspected_module="MemoryCleanupEngine",
+                explanation="A governanca sinalizou memoria possivelmente vencida.",
+                suggestion="Marcar como stale/arquivavel e pedir revisao humana.",
+                suggested_tests=[
+                    "Memoria vencida deve ser marcada como stale sem ser deletada automaticamente."
+                ],
+            )
+        if self._route(metadata) in {"world_query", "question_about_user"} and metadata.get("used_memory") and self._int(metadata.get("llm_calls")) > 0:
+            return self._event(
+                user_message,
+                athena_response,
+                metadata,
+                issue_type="llm_used_when_memory_exists",
+                severity="medium",
+                suspected_module="Memory/WorldModelQuery",
+                explanation="Uma consulta com memoria local disponivel usou LLM.",
+                suggestion="Responder primeiro com Memory/WorldModel e usar LLM apenas para ambiguidade real.",
+                suggested_tests=[
+                    "Consulta de fato conhecido deve manter llm_calls=0."
                 ],
             )
         return None

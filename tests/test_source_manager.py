@@ -124,7 +124,10 @@ class SourceManagerTests(unittest.TestCase):
             self.assertEqual(metadata["route"], "external_information")
             self.assertEqual(metadata["external_domain"], "news")
             self.assertEqual(metadata["source_status"], "missing_source")
+            self.assertEqual(metadata["capability_gap_type"], "missing_source")
+            self.assertEqual(metadata["module_proposal_title"], "NewsResearchConnector")
             self.assertIn("Não sei consultar notícias ainda", response)
+            self.assertIn("proposta de módulo", response)
             self.assertNotIn("manchete:", response.lower())
             self.assertEqual(metadata["llm_calls"], 0)
         finally:
@@ -137,6 +140,8 @@ class SourceManagerTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "missing_location")
         self.assertEqual(result["domain"], "weather")
+        self.assertEqual(result["capability_gap"]["gap_type"], "missing_memory_capability")
+        self.assertEqual(result["module_proposal"]["title"], "WeatherContextConnector")
         self.assertIn("localização padrão", result["response"])
         self.assertNotIn("Vou pesquisar", result["response"])
 
@@ -179,6 +184,8 @@ class SourceManagerTests(unittest.TestCase):
             self.assertEqual(metadata["route"], "external_information")
             self.assertEqual(metadata["external_domain"], "weather")
             self.assertEqual(metadata["source_status"], "missing_location")
+            self.assertEqual(metadata["capability_gap_type"], "missing_memory_capability")
+            self.assertEqual(metadata["module_proposal_title"], "WeatherContextConnector")
             self.assertIn("localização padrão", response)
             self.assertNotIn("Vai chover", response)
             self.assertEqual(metadata["llm_calls"], 0)

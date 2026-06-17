@@ -41,6 +41,7 @@ class CognitiveControlEngine:
             self._unknown_recovery,
             self._identity_route,
             self._capability_route,
+            self._admin_route,
             self._error_query,
             self._external_tool_missing,
             self._teach_intent,
@@ -52,6 +53,185 @@ class CognitiveControlEngine:
             if route:
                 return route
         return None
+
+    def _admin_route(self, _user_input, words, session_context=None):
+        if len(words) > 60:
+            return None
+        word_set = set(words)
+        text = " ".join(words)
+
+        if "v13" in word_set and word_set & {"pronta", "preparada", "ready"}:
+            return self._route_result(
+                route="memory_query",
+                intent="v12_readiness",
+                target="v13_readiness",
+                target_type="system",
+                structured_request={"operation": "v12_readiness"},
+                source="local_cognitive_v12_readiness",
+            )
+
+        learning_admin = self._learning_admin_route(words, word_set)
+        if learning_admin:
+            return learning_admin
+
+        expansion_admin = self._expansion_admin_route(words, word_set)
+        if expansion_admin:
+            return expansion_admin
+
+        if word_set & {"fonte", "fontes"}:
+            operation = "pending_sources" if word_set & {"pendente", "pendentes", "validacao", "validação"} else "source_admin"
+            return self._route_result(
+                route="memory_query",
+                intent=operation,
+                target="sources",
+                target_type="system",
+                structured_request={"operation": operation},
+                source="local_cognitive_source_admin",
+            )
+
+        if "pesquisando" in word_set or (word_set & {"estrategia", "estrategias"} and word_set & {"pesquisa", "pesquisar"}):
+            return self._route_result(
+                route="memory_query",
+                intent="research_admin",
+                target="research_strategies",
+                target_type="system",
+                structured_request={"operation": "research_admin"},
+                source="local_cognitive_research_admin",
+            )
+
+        if word_set & {"memoria", "memorias", "lembra", "lembrar"}:
+            if "sobre" in word_set:
+                target = self._extract_memory_target(words, session_context=session_context)
+                return self._route_result(
+                    route="memory_query",
+                    intent="memory_admin",
+                    target=target,
+                    target_type="entity" if target else "unknown",
+                    requires_memory=True,
+                    should_query_world_model=bool(target),
+                    structured_request={"operation": "memory_about_entity", "target": target},
+                    source="local_cognitive_memory_admin",
+                )
+            operation = "pending_memories"
+            if word_set & {"importante", "importantes"}:
+                operation = "important_memories"
+            elif word_set & {"velha", "velhas", "velho", "velhos", "stale", "vencida", "vencidas"}:
+                operation = "stale_memories"
+            elif word_set & {"melhoria", "melhorias", "melhorar"}:
+                operation = "improvement_memories"
+            return self._route_result(
+                route="memory_query",
+                intent=operation,
+                target="memory",
+                target_type="system",
+                requires_memory=True,
+                structured_request={"operation": operation},
+                source="local_cognitive_memory_admin",
+            )
+
+        if "confirmar" in word_set and word_set & {"comigo", "pendente", "pendentes"}:
+            return self._route_result(
+                route="memory_query",
+                intent="pending_memories",
+                target="memory",
+                target_type="system",
+                requires_memory=True,
+                structured_request={"operation": "pending_memories"},
+                source="local_cognitive_memory_admin",
+            )
+
+        if text in {"tem algo que voce precisa melhorar", "o que voce precisa melhorar"}:
+            return self._route_result(
+                route="memory_query",
+                intent="improvement_memories",
+                target="reflection",
+                target_type="system",
+                structured_request={"operation": "improvement_memories"},
+                source="local_cognitive_improvement_admin",
+            )
+        return None
+
+    def _expansion_admin_route(self, words, word_set):
+        if word_set & {"melhorar", "melhoria", "melhorias"}:
+            return None
+        module_terms = {"modulo", "modulos", "módulo", "módulos", "orgao", "orgaos", "órgão", "órgãos"}
+        proposal_terms = {"proposta", "propostas"}
+        gap_terms = {"lacuna", "lacunas", "falta", "precisa", "necessario", "necessário"}
+        if not (word_set & module_terms or word_set & proposal_terms or word_set & gap_terms):
+            return None
+
+        operation = ""
+        identifier = ""
+        if word_set & {"aprovar", "aprova", "aprove"} and word_set & proposal_terms:
+            operation = "approve_module_proposal"
+            identifier = words[-1] if words else ""
+        elif word_set & {"rejeitar", "rejeita", "rejeite"} and word_set & proposal_terms:
+            operation = "reject_module_proposal"
+            identifier = words[-1] if words else ""
+        elif word_set & proposal_terms or word_set & module_terms:
+            operation = "module_proposals"
+        elif word_set & gap_terms:
+            operation = "capability_gaps"
+        if not operation:
+            return None
+        return self._route_result(
+            route="memory_query",
+            intent=operation,
+            target="capability_expansion",
+            target_type="system",
+            structured_request={"operation": operation, "identifier": identifier},
+            source="local_cognitive_capability_gap_admin",
+        )
+
+    def _learning_admin_route(self, words, word_set):
+        has_training = word_set & {"treino", "treinamento", "exemplo", "exemplos"}
+        has_pattern = word_set & {"padrao", "padroes", "padrão", "padrões"}
+        has_insight = word_set & {"insight", "insights"}
+        has_teacher = ("llm" in word_set or "qwen" in word_set or "professora" in word_set) and word_set & {"ensinou", "ensinar", "insights"}
+        has_last_learning_question = word_set & {"aprendeu", "aprendi"} and word_set & {"ultima", "resposta"}
+        has_correction = word_set & {"corrige", "corrigir", "correcao", "correção"}
+
+        operation = ""
+        identifier = ""
+        if has_correction:
+            operation = "create_training_example_from_correction"
+        elif word_set & {"aprovar", "aprova", "aprove", "converter", "converta"}:
+            identifier = words[-1] if words else ""
+            if has_insight:
+                operation = "approve_self_insight"
+            elif has_training:
+                operation = "approve_training_example"
+        elif word_set & {"rejeitar", "rejeita", "rejeite"}:
+            identifier = words[-1] if words else ""
+            if has_insight:
+                operation = "reject_self_insight"
+            elif has_training:
+                operation = "reject_training_example"
+        elif has_training:
+            operation = "pending_training_examples"
+        elif has_pattern:
+            operation = "learned_linguistic_patterns"
+        elif has_insight:
+            operation = "pending_self_insights"
+        elif has_teacher:
+            operation = "llm_teacher_insights"
+        elif has_last_learning_question:
+            operation = "pending_self_insights"
+        elif "llm" in word_set and word_set & {"consegue", "fazer", "sem"}:
+            operation = "local_patterns_without_llm"
+        elif "llm" in word_set and word_set & {"dependem", "depende", "dependencia", "dependência"}:
+            operation = "llm_dependencies"
+
+        if not operation:
+            return None
+        return self._route_result(
+            route="memory_query",
+            intent=operation,
+            target="learning",
+            target_type="system",
+            structured_request={"operation": operation, "identifier": identifier},
+            source="local_cognitive_learning_admin",
+        )
 
     def _route_result(
         self,
@@ -402,6 +582,15 @@ class CognitiveControlEngine:
         if words[:2] in (["me", "fala"], ["me", "fale"]) and len(words) >= 3:
             return self._resolve_contextual_target(self._target_from_words(words[2:]), session_context)
         return ""
+
+    def _extract_memory_target(self, words, session_context=None):
+        if "sobre" not in words:
+            return ""
+        index = words.index("sobre")
+        target = self._target_from_words(words[index + 1 :])
+        if target.lower() in {"mim", "me"}:
+            return self.identity.get("creator", "")
+        return self._resolve_contextual_target(target, session_context)
 
     def _target_from_words(self, words):
         ignored = {"a", "o", "as", "os", "um", "uma", "uns", "umas", "sobre"}
