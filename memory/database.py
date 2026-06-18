@@ -294,9 +294,11 @@ class MemoryDB:
             content_hash TEXT NOT NULL UNIQUE,
             source TEXT,
             importance_score INTEGER NOT NULL DEFAULT 80,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
         )
         """)
+        self._ensure_column("long_term_memory", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
 
         self.conn.execute("""
         CREATE TABLE IF NOT EXISTS memory_relevance(
@@ -466,6 +468,15 @@ class MemoryDB:
         )
         """)
 
+        self.conn.commit()
+
+    def _ensure_column(self, table, column, definition):
+        cursor = self.conn.cursor()
+        cursor.execute(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in cursor.fetchall()}
+        if column in existing:
+            return
+        self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
         self.conn.commit()
 
     def _now(self):
@@ -1040,25 +1051,44 @@ class MemoryDB:
         cursor.execute("SELECT COUNT(*) FROM entity_states")
         return cursor.fetchone()[0]
 
-    def save_long_term_memory(self, content, source="manual", importance_score=80):
+    def save_long_term_memory(self, content, source="manual", importance_score=80, metadata=None):
         clean_content = content.strip()
+        metadata_json = json.dumps(dict(metadata or {}), ensure_ascii=False, sort_keys=True, default=str)
         self.conn.execute(
             """
-            INSERT OR IGNORE INTO long_term_memory(content, content_hash, source, importance_score, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO long_term_memory(content, content_hash, source, importance_score, created_at, metadata_json)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (clean_content, self._hash(clean_content), source, int(importance_score), self._now())
+            (clean_content, self._hash(clean_content), source, int(importance_score), self._now(), metadata_json)
         )
         self.conn.commit()
         cursor = self.conn.cursor()
         cursor.execute("SELECT id FROM long_term_memory WHERE content_hash = ?", (self._hash(clean_content),))
         row = cursor.fetchone()
+        if row and metadata:
+            self.conn.execute(
+                "UPDATE long_term_memory SET metadata_json = ? WHERE id = ? AND (metadata_json = '{}' OR metadata_json IS NULL)",
+                (metadata_json, row[0]),
+            )
+            self.conn.commit()
         return row[0] if row else None
 
     def list_long_term_memory(self):
         cursor = self.conn.cursor()
         cursor.execute("SELECT id, content, source, importance_score, created_at FROM long_term_memory ORDER BY created_at ASC")
         return cursor.fetchall()
+
+    def list_long_term_memory_with_metadata(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, content, source, importance_score, created_at, metadata_json FROM long_term_memory ORDER BY created_at ASC")
+        rows = []
+        for memory_id, content, source, importance_score, created_at, metadata_json in cursor.fetchall():
+            try:
+                metadata = json.loads(metadata_json or "{}")
+            except json.JSONDecodeError:
+                metadata = {}
+            rows.append((memory_id, content, source, importance_score, created_at, metadata))
+        return rows
 
     def count_real_long_term_memory(self):
         cursor = self.conn.cursor()

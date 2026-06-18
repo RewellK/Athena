@@ -1,5 +1,7 @@
 import unicodedata
 
+from commands.command_interpreter import CommandInterpreter
+
 
 class CognitiveControlEngine:
     """Local-first cognitive control for clear, low-risk route decisions.
@@ -27,6 +29,7 @@ class CognitiveControlEngine:
     def __init__(self, identity=None, settings=None):
         self.identity = identity or {}
         self.settings = settings
+        self.command_interpreter = CommandInterpreter()
 
     def classify(self, user_input, pending_state=None, session_context=None):
         words = self._words(user_input)
@@ -38,9 +41,11 @@ class CognitiveControlEngine:
             return pending_route
 
         for resolver in (
+            self._command_palette_route,
             self._unknown_recovery,
             self._identity_route,
             self._capability_route,
+            self._runtime_status_route,
             self._admin_route,
             self._error_query,
             self._external_tool_missing,
@@ -52,6 +57,58 @@ class CognitiveControlEngine:
             route = resolver(user_input, words, session_context)
             if route:
                 return route
+        return None
+
+    def _command_palette_route(self, user_input, words, session_context=None):
+        if len(words) > 60:
+            return None
+        command = self.command_interpreter.interpret(user_input)
+        if not command:
+            return None
+        return self._route_result(
+            route="system",
+            intent="command_palette",
+            target=command.get("mode", "command_palette"),
+            target_type="system",
+            structured_request={"operation": "command_palette", "command": command},
+            source="local_cognitive_command_palette",
+        )
+
+    def _runtime_status_route(self, _user_input, words, _session_context=None):
+        if len(words) > 18:
+            return None
+        text = " ".join(words)
+        word_set = set(words)
+        if word_set & {"v12", "v13"}:
+            return None
+        if "status" in word_set and (word_set & {"athena", "voce", "vc"} or len(words) <= 3):
+            return self._route_result(
+                route="system",
+                intent="runtime_status",
+                target="runtime",
+                target_type="system",
+                structured_request={"operation": "runtime_status"},
+                source="local_cognitive_runtime_status",
+            )
+        phrases = {
+            "o que voce esta fazendo",
+            "voce esta acordada",
+            "voce esta processando algo",
+            "voce tem pendencias",
+            "tem algo aguardando minha aprovacao",
+            "voce esta em modo seguro",
+            "como voce esta",
+            "voce esta pronta",
+        }
+        if text in phrases:
+            return self._route_result(
+                route="system",
+                intent="runtime_status",
+                target="runtime",
+                target_type="system",
+                structured_request={"operation": "runtime_status"},
+                source="local_cognitive_runtime_status",
+            )
         return None
 
     def _admin_route(self, _user_input, words, session_context=None):
@@ -104,7 +161,7 @@ class CognitiveControlEngine:
                 source="local_cognitive_research_admin",
             )
 
-        if word_set & {"memoria", "memorias", "lembra", "lembrar"}:
+        if word_set & {"memoria", "memorias", "lembra", "lembrar"} and self._memory_admin_requested(words, word_set):
             if "sobre" in word_set:
                 target = self._extract_memory_target(words, session_context=session_context)
                 return self._route_result(
@@ -155,6 +212,33 @@ class CognitiveControlEngine:
                 source="local_cognitive_improvement_admin",
             )
         return None
+
+    def _memory_admin_requested(self, words, word_set):
+        if self._looks_like_question(words):
+            return True
+        admin_terms = {
+            "mostre",
+            "mostrar",
+            "liste",
+            "listar",
+            "apague",
+            "apagar",
+            "remova",
+            "remover",
+            "pendente",
+            "pendentes",
+            "importante",
+            "importantes",
+            "velha",
+            "velhas",
+            "velho",
+            "velhos",
+            "vencida",
+            "vencidas",
+            "melhoria",
+            "melhorias",
+        }
+        return bool(word_set & admin_terms)
 
     def _location_admin_route(self, user_input, words, word_set):
         location_terms = {"localizacao", "localização", "cidade", "local"}

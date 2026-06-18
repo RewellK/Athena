@@ -12,6 +12,7 @@ from agency.tool_registry import ToolRegistry
 from background_tasks.task_runner import BackgroundTaskRunner
 from capabilities.self_expansion_planner import SelfExpansionPlanner
 from bootstrap import AthenaBootstrap
+from commands import CommandPaletteEngine, CommandSessionStore
 from core.context_builder import ContextBuilder
 from core.logger import AthenaLogger
 from core.settings import Settings
@@ -33,9 +34,18 @@ from language.linguistic_learning_workbench import LinguisticLearningWorkbench
 from language.optional_spacy_analyzer import OptionalSpacyAnalyzer
 from language.semantic_frame import SemanticFrameExtractor
 from learning.async_llm_teacher_loop import AsyncLlmTeacherLoop, LlmTeacherInsightStore
+from learning.daily_cognitive_review import DailyCognitiveReview
+from learning.day_memory_buffer import DayMemoryBuffer
+from learning.learning_candidate_store import LearningCandidateStore
 from learning.learning_engine import LearningEngine
+from learning.learning_harvest_worker import LearningHarvestWorker
 from learning.learning_interface import LearningInterface
+from learning.learning_promotion_engine import LearningPromotionEngine
+from learning.learning_report_engine import LearningReportEngine
+from learning.learning_review_queue import LearningReviewQueue
+from learning.learning_session_engine import LearningSessionEngine
 from learning.self_insight_engine import SelfInsightEngine, SelfInsightStore
+from learning.study_command_engine import StudyCommandEngine
 from location.location_manager import LocationManager
 from location.location_store import LocationStore
 from llm.provider import OllamaProvider
@@ -51,6 +61,7 @@ from reasoning.reasoning_engine import ReasoningEngine
 from reflection.reflection_engine import ReflectionEngine
 from research.research_learning_engine import ResearchLearningEngine
 from research.research_strategy_memory import ResearchStrategyMemory
+from runtime import CognitiveStatusEngine, DailyBriefingPlanner, RuntimeSupervisor
 from self_model.self_model import SelfModel
 from self_code_awareness.self_code_awareness_engine import SelfCodeAwarenessEngine
 from sources.source_manager import SourceManager
@@ -233,6 +244,73 @@ class Athena:
             research_learning_engine=self.research_learning_engine,
             self_insight_engine=self.self_insight_engine,
             location_manager=self.location_manager,
+        )
+        self.learning_candidate_store = LearningCandidateStore(
+            path=self.settings.get("learningCandidateStorePath", "logs/learning_candidates.json")
+        )
+        self.learning_session_engine = LearningSessionEngine(
+            path=self.settings.get("learningSessionStorePath", "logs/learning_sessions.json"),
+            candidate_store=self.learning_candidate_store,
+        )
+        self.day_memory_buffer = DayMemoryBuffer(
+            path=self.settings.get("dayMemoryBufferPath", "logs/day_memory_buffer.json")
+        )
+        self.learning_review_queue = LearningReviewQueue(candidate_store=self.learning_candidate_store)
+        self.learning_harvest_worker = LearningHarvestWorker(
+            session_engine=self.learning_session_engine,
+            candidate_store=self.learning_candidate_store,
+            teacher_loop=self.async_llm_teacher_loop,
+            risk_lexicon=self.settings.get("learningRiskLexicon"),
+        )
+        self.learning_report_engine = LearningReportEngine(candidate_store=self.learning_candidate_store)
+        self.learning_promotion_engine = LearningPromotionEngine(
+            candidate_store=self.learning_candidate_store,
+            memory=self.memory,
+            self_insight_engine=self.self_insight_engine,
+            module_proposal_engine=self.source_manager.module_proposal_engine,
+        )
+        self.daily_cognitive_review = DailyCognitiveReview(
+            day_buffer=self.day_memory_buffer,
+            harvest_worker=self.learning_harvest_worker,
+            candidate_store=self.learning_candidate_store,
+        )
+        self.study_command_engine = StudyCommandEngine(
+            daily_review=self.daily_cognitive_review,
+            report_engine=self.learning_report_engine,
+        )
+        self.daily_briefing_planner = DailyBriefingPlanner(
+            learning_candidate_store=self.learning_candidate_store,
+            self_insight_engine=self.self_insight_engine,
+            module_proposal_engine=self.source_manager.module_proposal_engine,
+            source_manager=self.source_manager,
+        )
+        self.runtime_supervisor = RuntimeSupervisor(
+            settings=self.settings,
+            logger=self.logger,
+            learning_harvest_worker=self.learning_harvest_worker,
+            daily_briefing_planner=self.daily_briefing_planner,
+        )
+        self.daily_briefing_planner.runtime_supervisor = self.runtime_supervisor
+        self.cognitive_status_engine = CognitiveStatusEngine(
+            runtime_supervisor=self.runtime_supervisor,
+            task_registry=self.runtime_supervisor.task_registry,
+            learning_session_engine=self.learning_session_engine,
+            learning_candidate_store=self.learning_candidate_store,
+            self_insight_engine=self.self_insight_engine,
+            module_proposal_engine=self.source_manager.module_proposal_engine,
+            day_memory_buffer=self.day_memory_buffer,
+        )
+        self.command_palette_engine = CommandPaletteEngine(
+            session_store=CommandSessionStore(path=self.settings.get("commandSessionStorePath", "logs/command_sessions.json")),
+            learning_session_engine=self.learning_session_engine,
+            learning_harvest_worker=self.learning_harvest_worker,
+            learning_report_engine=self.learning_report_engine,
+            learning_candidate_store=self.learning_candidate_store,
+            learning_promotion_engine=self.learning_promotion_engine,
+            cognitive_status_engine=self.cognitive_status_engine,
+            runtime_supervisor=self.runtime_supervisor,
+            study_command_engine=self.study_command_engine,
+            memory=self.memory,
         )
 
         self.pending_world_extraction = None
@@ -876,6 +954,27 @@ Fatos estruturados:
         if operation == "unknown_recovery":
             return self._explain_last_unknown()
 
+        if operation == "command_palette":
+            command_engine = getattr(self, "command_palette_engine", None)
+            if command_engine:
+                return command_engine.respond(
+                    user_input=intention.get("raw_user_input", ""),
+                    command=request.get("command"),
+                )
+            return "Reconheci um comando cognitivo, mas a CommandPaletteEngine ainda não está conectada."
+
+        if operation == "runtime_status":
+            status_engine = getattr(self, "cognitive_status_engine", None)
+            if status_engine:
+                return status_engine.status()
+            return "Ainda não tenho CognitiveStatusEngine conectado."
+
+        if operation == "runtime_diagnostic":
+            status_engine = getattr(self, "cognitive_status_engine", None)
+            if status_engine:
+                return status_engine.diagnostic()
+            return "Ainda não tenho diagnóstico runtime conectado."
+
         if operation == "teach_intent":
             return self._handle_teach_intent_route()
 
@@ -910,7 +1009,10 @@ Fatos estruturados:
                 if callable(remember):
                     remember(target, entity_type="unknown", source="memory_admin")
                 response = self._describe_entity_from_memory(target, user_input=user_input)
-                return response or f"Ainda não tenho memórias consolidadas sobre {target}."
+                if response:
+                    return response
+                learned = self._answer_local_learned_topic(target)
+                return learned or f"Ainda não tenho memórias consolidadas sobre {target}."
             return "Ainda preciso de um alvo para consultar minhas memórias."
 
         if operation in {"source_admin", "pending_sources"}:
@@ -959,6 +1061,20 @@ Fatos estruturados:
             return self.self_expansion_planner.respond(operation, identifier=request.get("identifier"), user_input=user_input)
 
         return self.memory_admin_engine.respond(request, user_input=user_input)
+
+    def _answer_local_learned_topic(self, target):
+        command_engine = getattr(self, "command_palette_engine", None)
+        if not command_engine:
+            return ""
+        try:
+            response = command_engine.respond(
+                command={"command": "learned_about_topic", "topic": str(target or "").strip()}
+            )
+        except Exception:
+            return ""
+        if response.startswith("Ainda não tenho aprendizado consolidado"):
+            return ""
+        return response
 
     def _handle_capability_route(self, intention):
         request = self._structured_request(intention)
@@ -1979,6 +2095,7 @@ Mensagem do usuário:
                 "model": self.settings.get("ollamaModel"),
                 "error": llm_health.get("error", ""),
             },
+            "runtime": self.runtime_supervisor.get_status() if getattr(self, "runtime_supervisor", None) else {"state": "offline"},
             "voice": voice_status,
             "sound": sound_status,
             "last_response_metadata": self.last_response_metadata,
@@ -2072,6 +2189,7 @@ Mensagem do usuário:
         metadata["pending_confirmation"] = self._pending_state().get("pending_type")
         metadata["response_ms"] = int((time.perf_counter() - started_at) * 1000)
         final_metadata = self.conversation_metrics.finish(started_at, user_input, metadata)
+        self._record_runtime_experience(user_input, response_text, final_metadata)
         self._observe_turn_reflection(user_input, response_text, final_metadata, route_result)
         self._enqueue_llm_teacher_turn(user_input, response_text, final_metadata)
         self.last_response_metadata = final_metadata
@@ -2087,6 +2205,119 @@ Mensagem do usuário:
             )
             return response_text + debug
         return response_text
+
+    def _record_runtime_experience(self, user_input, response_text, metadata):
+        metadata = metadata if isinstance(metadata, dict) else {}
+        route = metadata.get("route", "")
+        intent = metadata.get("intent", "")
+        runtime_state = ""
+        runtime = getattr(self, "runtime_supervisor", None)
+        if runtime:
+            try:
+                runtime_state = runtime.get_status().get("state", "")
+            except Exception:
+                runtime_state = ""
+
+        context_type = self._day_context_type(route, intent, user_input)
+        buffer = getattr(self, "day_memory_buffer", None)
+        if buffer:
+            try:
+                buffer.add_entry(
+                    user_input,
+                    source="user",
+                    context_type=context_type,
+                    sensitivity_level=self._sensitivity_level(user_input),
+                    candidate_importance=self._candidate_importance(route, intent),
+                    linked_runtime_state=runtime_state,
+                    tags=[route, intent],
+                )
+                buffer.add_entry(
+                    response_text,
+                    source="athena",
+                    context_type="response",
+                    sensitivity_level="low",
+                    candidate_importance=0.1,
+                    linked_runtime_state=runtime_state,
+                    tags=[route],
+                )
+            except Exception as error:
+                self.handle_exception(error, {"module": "learning/day_memory_buffer.py", "operation": "add_entry"})
+
+        session_engine = getattr(self, "learning_session_engine", None)
+        if session_engine and session_engine.active_session():
+            try:
+                session_engine.record_message("user", user_input, metadata=metadata)
+                session_engine.record_message("athena", response_text, metadata={"route": route, "intent": intent})
+            except Exception as error:
+                self.handle_exception(error, {"module": "learning/learning_session_engine.py", "operation": "record_message"})
+
+    def _day_context_type(self, route, intent, user_input):
+        text = self._normalize_local_phrase(user_input)
+        if route == "system":
+            return "command"
+        if route == "learning":
+            return "project_context" if "athena" in text else "personal_context"
+        if route in {"memory_query", "world_query", "question_about_user"}:
+            return "conversation"
+        if any(word in text.split() for word in {"corrige", "corrigir", "correcao", "correção"}):
+            return "correction"
+        if any(word in text.split() for word in {"decidimos", "decidi", "decisao", "decisão"}):
+            return "decision"
+        return "conversation"
+
+    def _sensitivity_level(self, text):
+        normalized = self._normalize_local_phrase(text)
+        if self._matches_sensitivity_lexicon(normalized, "high"):
+            return "high"
+        if self._matches_sensitivity_lexicon(normalized, "medium"):
+            return "medium"
+        return "low"
+
+    def _matches_sensitivity_lexicon(self, normalized, level):
+        lexicon = self.settings.get("runtimeSensitivityLexicon", {}) if self.settings else {}
+        default = {
+            "high": [
+                "senha",
+                "token",
+                "chave",
+                "credencial",
+                "cpf",
+                "cartao",
+                "banco",
+                "medico",
+                "juridico",
+                "localizacao",
+            ],
+            "medium": [
+                "familia",
+                "rotina",
+                "financeiro",
+                "terceiros",
+                "endereco",
+                "relacionamento",
+                "privado",
+                "pessoal",
+            ],
+        }
+        values = lexicon.get(level) if isinstance(lexicon, dict) else None
+        terms = values if values else default.get(level, [])
+        words = set(normalized.split())
+        for term in terms:
+            clean = self._normalize_local_phrase(term)
+            if not clean:
+                continue
+            if " " in clean and clean in normalized:
+                return True
+            if clean in words:
+                return True
+        return False
+
+    def _candidate_importance(self, route, intent):
+        if route in {"learning", "system"}:
+            return 0.7
+        if route in {"world_query", "memory_query", "question_about_user"}:
+            return 0.4
+        return 0.2
 
     def _observe_turn_reflection(self, user_input, response_text, metadata, route_result=None):
         reflection_engine = getattr(self, "reflection_engine", None)

@@ -7,6 +7,7 @@ from agency.tool_registry import ToolRegistry
 from bootstrap import AthenaBootstrap
 from brain.orchestrator import Athena
 from capabilities.self_expansion_planner import SelfExpansionPlanner
+from commands import CommandPaletteEngine, CommandSessionStore
 from conversation.conversation_context import ConversationContext
 from conversation.conversation_engine import ConversationEngine
 from conversation.conversation_metrics import ConversationMetrics
@@ -16,6 +17,10 @@ from conversation.identity_engine import IdentityEngine
 from language.linguistic_learning_workbench import LinguisticLearningWorkbench
 from language.semantic_frame import SemanticFrameExtractor
 from learning.async_llm_teacher_loop import AsyncLlmTeacherLoop, LlmTeacherInsightStore
+from learning.daily_cognitive_review import DailyCognitiveReview
+from learning.day_memory_buffer import DayMemoryBuffer
+from learning.learning_candidate_store import LearningCandidateStore
+from learning.learning_harvest_worker import LearningHarvestWorker
 from location.location_manager import LocationManager
 from location.location_store import LocationStore
 from llm.provider import LLMResult
@@ -34,7 +39,13 @@ from research.research_learning_engine import ResearchLearningEngine
 from research.research_strategy_memory import ResearchStrategyMemory
 from self_model.self_model import SelfModel
 from learning.learning_interface import LearningInterface
+from learning.learning_promotion_engine import LearningPromotionEngine
+from learning.learning_report_engine import LearningReportEngine
+from learning.learning_review_queue import LearningReviewQueue
+from learning.learning_session_engine import LearningSessionEngine
 from learning.self_insight_engine import SelfInsightEngine, SelfInsightStore
+from learning.study_command_engine import StudyCommandEngine
+from runtime import CognitiveStatusEngine, DailyBriefingPlanner, RuntimeSupervisor
 from sources.source_manager import SourceManager
 from world_model.world_model import WorldModel
 from core.context_builder import ContextBuilder
@@ -94,6 +105,15 @@ class FakeSettings:
                 "longitude": None,
             },
             "useAthenaSemanticLanguage": False,
+            "runtimeStateStorePath": "",
+            "runtimeTaskStorePath": "",
+            "runtimeAuditLogPath": "",
+            "runtimeBackgroundLoopEnabled": False,
+            "runtimeLoopIntervalSeconds": 5,
+            "learningSessionStorePath": "",
+            "learningCandidateStorePath": "",
+            "commandSessionStorePath": "",
+            "dayMemoryBufferPath": "",
         }
         self.values.update(values or {})
 
@@ -472,6 +492,65 @@ def make_athena(tmp_path):
         research_learning_engine=athena.research_learning_engine,
         self_insight_engine=athena.self_insight_engine,
         location_manager=athena.location_manager,
+    )
+    athena.learning_candidate_store = LearningCandidateStore()
+    athena.learning_session_engine = LearningSessionEngine(candidate_store=athena.learning_candidate_store)
+    athena.day_memory_buffer = DayMemoryBuffer()
+    athena.learning_review_queue = LearningReviewQueue(candidate_store=athena.learning_candidate_store)
+    athena.learning_harvest_worker = LearningHarvestWorker(
+        session_engine=athena.learning_session_engine,
+        candidate_store=athena.learning_candidate_store,
+        teacher_loop=athena.async_llm_teacher_loop,
+    )
+    athena.learning_report_engine = LearningReportEngine(candidate_store=athena.learning_candidate_store)
+    athena.learning_promotion_engine = LearningPromotionEngine(
+        candidate_store=athena.learning_candidate_store,
+        memory=memory,
+        self_insight_engine=athena.self_insight_engine,
+        module_proposal_engine=athena.source_manager.module_proposal_engine,
+    )
+    athena.daily_cognitive_review = DailyCognitiveReview(
+        day_buffer=athena.day_memory_buffer,
+        harvest_worker=athena.learning_harvest_worker,
+        candidate_store=athena.learning_candidate_store,
+    )
+    athena.study_command_engine = StudyCommandEngine(
+        daily_review=athena.daily_cognitive_review,
+        report_engine=athena.learning_report_engine,
+    )
+    athena.daily_briefing_planner = DailyBriefingPlanner(
+        learning_candidate_store=athena.learning_candidate_store,
+        self_insight_engine=athena.self_insight_engine,
+        module_proposal_engine=athena.source_manager.module_proposal_engine,
+        source_manager=athena.source_manager,
+    )
+    athena.runtime_supervisor = RuntimeSupervisor(
+        settings=settings,
+        logger=logger,
+        learning_harvest_worker=athena.learning_harvest_worker,
+        daily_briefing_planner=athena.daily_briefing_planner,
+    )
+    athena.daily_briefing_planner.runtime_supervisor = athena.runtime_supervisor
+    athena.cognitive_status_engine = CognitiveStatusEngine(
+        runtime_supervisor=athena.runtime_supervisor,
+        task_registry=athena.runtime_supervisor.task_registry,
+        learning_session_engine=athena.learning_session_engine,
+        learning_candidate_store=athena.learning_candidate_store,
+        self_insight_engine=athena.self_insight_engine,
+        module_proposal_engine=athena.source_manager.module_proposal_engine,
+        day_memory_buffer=athena.day_memory_buffer,
+    )
+    athena.command_palette_engine = CommandPaletteEngine(
+        session_store=CommandSessionStore(),
+        learning_session_engine=athena.learning_session_engine,
+        learning_harvest_worker=athena.learning_harvest_worker,
+        learning_report_engine=athena.learning_report_engine,
+        learning_candidate_store=athena.learning_candidate_store,
+        learning_promotion_engine=athena.learning_promotion_engine,
+        cognitive_status_engine=athena.cognitive_status_engine,
+        runtime_supervisor=athena.runtime_supervisor,
+        study_command_engine=athena.study_command_engine,
+        memory=memory,
     )
     athena.message_sound_engine = NullSound()
     athena.voice_engine = NullVoice()
