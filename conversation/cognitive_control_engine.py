@@ -242,7 +242,8 @@ class CognitiveControlEngine:
 
     def _location_admin_route(self, user_input, words, word_set):
         location_terms = {"localizacao", "localização", "cidade", "local"}
-        if not (word_set & location_terms):
+        living_terms = {"moro", "mora", "moramos", "vivemos", "resido", "residimos"}
+        if not (word_set & location_terms or word_set & living_terms):
             return None
         text = " ".join(words)
         operation = ""
@@ -261,8 +262,10 @@ class CognitiveControlEngine:
             or "minha localizacao eh" in text
             or "minha cidade e" in text
             or "minha cidade eh" in text
-            or ("use" in word_set and word_set & {"padrao", "padrão"})
+            or ("use" in word_set and (word_set & {"padrao", "padrão"} or word_set & location_terms))
             or ("configure" in word_set and word_set & {"cidade", "localizacao", "localização"})
+            or (word_set & {"registre", "registrar", "registr", "registra"} and word_set & living_terms)
+            or (word_set & living_terms and word_set & {"cidade", "localizacao", "localização"})
         ):
             operation = "set_default_location"
         if not operation:
@@ -280,15 +283,16 @@ class CognitiveControlEngine:
         create_terms = {"crie", "criar", "cria", "proponha", "propor", "registre", "registrar"}
         if word_set & {"melhorar", "melhoria", "melhorias"} and not (word_set & create_terms):
             return None
-        module_terms = {"modulo", "modulos", "módulo", "módulos", "orgao", "orgaos", "órgão", "órgãos"}
+        module_terms = {"modulo", "modulos", "módulo", "módulos", "orgao", "orgaos", "órgão", "órgãos", "conector", "conectores", "connector", "connectors"}
         proposal_terms = {"proposta", "propostas"}
         gap_terms = {"lacuna", "lacunas", "falta", "precisa", "necessario", "necessário"}
-        if not (word_set & module_terms or word_set & proposal_terms or word_set & gap_terms or word_set & create_terms):
+        connector_like = any("connector" in word or "conector" in word or "geocode" in word for word in words)
+        if not (word_set & module_terms or word_set & proposal_terms or word_set & gap_terms or word_set & create_terms or connector_like):
             return None
 
         operation = ""
         identifier = ""
-        if word_set & create_terms and (word_set & proposal_terms or word_set & module_terms or word_set & {"melhoria", "melhorias"}):
+        if word_set & create_terms and (word_set & proposal_terms or word_set & module_terms or word_set & {"melhoria", "melhorias"} or connector_like):
             operation = "create_module_proposal"
         elif word_set & {"aprovar", "aprova", "aprove"} and word_set & proposal_terms:
             operation = "approve_module_proposal"

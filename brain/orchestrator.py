@@ -1029,7 +1029,16 @@ Fatos estruturados:
 
         if operation in {"location_status", "clear_location", "deny_location", "why_location", "set_location", "set_default_location", "one_time_location"}:
             metadata["used_location_manager"] = True
-            return self.memory_admin_engine.respond({"operation": operation}, user_input=user_input)
+            response = self.memory_admin_engine.respond({"operation": operation}, user_input=user_input)
+            if operation in {"set_location", "set_default_location", "one_time_location"}:
+                self.pending_location_request = None
+                proposal = self._prepare_geocoding_module_proposal_if_needed(user_input, metadata)
+                if proposal and "GeocodingConnector" not in response:
+                    response += (
+                        "\nTambém percebi que falta um GeocodingConnector para transformar cidade em coordenadas "
+                        "sem inventar latitude/longitude. Posso registrar essa proposta para revisão humana."
+                    )
+            return response
 
         if operation in {"pending_memories", "important_memories", "stale_memories", "improvement_memories"}:
             metadata["used_memory"] = True
@@ -1061,6 +1070,44 @@ Fatos estruturados:
             return self.self_expansion_planner.respond(operation, identifier=request.get("identifier"), user_input=user_input)
 
         return self.memory_admin_engine.respond(request, user_input=user_input)
+
+    def _prepare_geocoding_module_proposal_if_needed(self, user_input, metadata=None):
+        source_manager = getattr(self, "source_manager", None)
+        location_manager = getattr(self, "location_manager", None)
+        if not source_manager or not location_manager:
+            return {}
+        location = location_manager.current() if hasattr(location_manager, "current") else None
+        if not location or location.get("consent_status") != "granted" or not location.get("city"):
+            return {}
+        if hasattr(location_manager, "has_coordinates") and location_manager.has_coordinates(location):
+            return {}
+        gap_engine = getattr(source_manager, "capability_gap_engine", None)
+        proposal_engine = getattr(source_manager, "module_proposal_engine", None)
+        if not gap_engine or not proposal_engine:
+            return {}
+        gap = gap_engine.detect_external_gap(
+            "weather",
+            "missing_geocoder",
+            query=user_input,
+            source={"name": "Open-Meteo"},
+        )
+        module_proposal = proposal_engine.propose_for_gap(gap, query=user_input)
+        self.pending_module_proposal = self._make_pending(
+            "module_proposal_approval",
+            f"Registrar proposta de módulo {module_proposal.get('title')}",
+            module_proposal=module_proposal,
+            capability_gap=gap,
+        )
+        if metadata is not None:
+            metadata["capability_gap_type"] = gap.get("gap_type")
+            metadata["capability_gap_domain"] = gap.get("domain")
+            metadata["module_proposal_title"] = module_proposal.get("title")
+            metadata["module_proposal_status"] = module_proposal.get("status")
+            metadata["module_proposal_id"] = module_proposal.get("proposal_id")
+        insight_engine = getattr(self, "self_insight_engine", None)
+        if insight_engine and hasattr(insight_engine, "create_from_capability_gap"):
+            insight_engine.create_from_capability_gap(gap, module_proposal=module_proposal)
+        return module_proposal
 
     def _answer_local_learned_topic(self, target):
         command_engine = getattr(self, "command_palette_engine", None)
@@ -1849,6 +1896,11 @@ Resultado estruturado do Core:
         if text in approvals:
             return "approval"
         if text in rejections:
+            return "rejection"
+        words = set(text.split())
+        if words & {"ok", "sim", "pode", "autorizo", "confirmo", "claro"} and words & {"criar", "registrar", "registre", "crie", "salvar", "salve", "guardar"}:
+            return "approval"
+        if words & {"nao", "não", "cancela", "cancelar", "rejeito"} and words & {"criar", "registrar", "salvar", "guardar"}:
             return "rejection"
         return intention_type
 

@@ -3,7 +3,7 @@
     "ollamaUrl": "http://localhost:11434/api/generate",
     "ollamaModel": "qwen2.5:3b",
     "voiceEnabled": true,
-    "voiceProvider": "macos_say",
+    "voiceProvider": "openai_tts",
     "fallbackVoiceProvider": "macos_say",
     "piperCommand": "piper",
     "piperModelPath": "",
@@ -27,6 +27,7 @@
     "desktopGuiEnabled": true,
     "officialRepositoryUrl": "https://github.com/RewellK/Athena/",
     "projectRoot": ".",
+    "rewriteSettingsOnLoad": false,
     "gitReadOnly": true,
     "selfCodeAwarenessEnabled": true,
     "gitAwarenessEnabled": true,
@@ -48,7 +49,7 @@
     "fastMemoryResponses": true,
     "fastLocalSmallTalkResponses": true,
     "startupGreetingEnabled": true,
-    "startupGreetingSpeak": false,
+    "startupGreetingSpeak": true,
     "pendingConfirmationBlocksConversation": false,
     "pendingConfirmationTtlSeconds": 300,
     "voiceRate": 180,
@@ -56,7 +57,7 @@
     "voiceName": null,
     "voiceProfile": "default",
     "voiceSpeakResponses": true,
-    "voiceSpeakStartupGreeting": false,
+    "voiceSpeakStartupGreeting": true,
     "llmTimeoutSeconds": 30,
     "conversationMetricsEnabled": true,
     "reflectionEnabled": true,
@@ -69,6 +70,7 @@
     "llmTeacherInsightStorePath": "logs/llm_teacher_insights.json",
     "selfInsightStorePath": "logs/self_insights.json",
     "moduleProposalStorePath": "logs/module_proposals.json",
+    "userLocationStorePath": "logs/user_location.json",
     "addressUserAs": null,
     "sourcesEnabled": true,
     "allowExternalRequests": true,
@@ -98,5 +100,73 @@
     "useLLMIntentResolution": true,
     "allowLocalIntentFallback": false,
     "intentResolutionTimeoutSeconds": 8,
-    "useAthenaSemanticLanguage": false
+    "useAthenaSemanticLanguage": false,
+    "runtimeStateStorePath": "logs/runtime_state.json",
+    "runtimeTaskStorePath": "logs/runtime_tasks.json",
+    "runtimeAuditLogPath": "logs/runtime_audit.jsonl",
+    "runtimeBackgroundLoopEnabled": false,
+    "runtimeLoopIntervalSeconds": 5,
+    "learningSessionStorePath": "logs/learning_sessions.json",
+    "learningCandidateStorePath": "logs/learning_candidates.json",
+    "commandSessionStorePath": "logs/command_sessions.json",
+    "dayMemoryBufferPath": "logs/day_memory_buffer.json",
+    "runtimeSensitivityLexicon": {
+        "high": [
+            "senha",
+            "token",
+            "chave",
+            "credencial",
+            "cpf",
+            "cartao",
+            "banco",
+            "medico",
+            "juridico",
+            "localizacao"
+        ],
+        "medium": [
+            "familia",
+            "rotina",
+            "financeiro",
+            "terceiros",
+            "endereco",
+            "relacionamento",
+            "privado",
+            "pessoal"
+        ]
+    },
+    "learningRiskLexicon": {
+        "high": [
+            "senha",
+            "senhas",
+            "token",
+            "tokens",
+            "chave",
+            "credencial",
+            "credenciais",
+            "cpf",
+            "cartao",
+            "banco",
+            "medico",
+            "juridico",
+            "localizacao"
+        ],
+        "medium": [
+            "familia",
+            "rotina",
+            "financeiro",
+            "terceiro",
+            "terceiros",
+            "endereco",
+            "relacionamento",
+            "privado",
+            "pessoal"
+        ]
+    },
+    "dailyStudy": {
+        "enabled": false,
+        "time": "23:00",
+        "useLlmTeacher": true,
+        "autoPromoteLowRisk": false,
+        "requireReview": true
+    }
 }

@@ -62,7 +62,7 @@ class CapabilityGapEngine:
                 missing_inputs=["latitude", "longitude"],
                 source_status=status,
                 source_candidate=source.get("name", ""),
-                reason="Existe cidade salva, mas falta um geocoder validado para obter latitude/longitude.",
+                reason="Existe cidade conhecida ou informada, mas falta um geocoder validado para obter latitude/longitude.",
             ).to_dict()
         if status == "source_failure":
             return CapabilityGap(

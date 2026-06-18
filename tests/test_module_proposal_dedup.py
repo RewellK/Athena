@@ -34,6 +34,23 @@ class ModuleProposalDedupTests(unittest.TestCase):
         self.assertEqual(proposals[0]["title"], "LearningReviewPanel")
         self.assertEqual(proposals[0]["status"], "pending_human_review")
 
+    def test_athena_creates_geocoding_connector_from_direct_connector_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            athena = make_athena(Path(tmp))
+            try:
+                response = athena.chat("Ok, pode criar o GeocodingConnector, se necessário.")
+                metadata = athena.last_response_metadata
+
+                self.assertEqual(metadata["route"], "memory_query")
+                self.assertEqual(metadata["intent"], "create_module_proposal")
+                self.assertIn("GeocodingConnector", response)
+                proposals = athena.source_manager.list_module_proposals()
+                self.assertEqual(proposals[0]["title"], "GeocodingConnector")
+                self.assertEqual(proposals[0]["status"], "pending_human_review")
+                self.assertEqual(metadata["llm_calls"], 0)
+            finally:
+                athena.memory.close()
+
     def test_athena_reuses_vehicle_module_proposal_after_approval(self):
         with tempfile.TemporaryDirectory() as tmp:
             athena = make_athena(Path(tmp))

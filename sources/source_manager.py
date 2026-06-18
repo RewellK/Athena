@@ -277,6 +277,15 @@ class SourceManager:
             return {}
         location = self._weather_location()
         if not location:
+            query_location = self._weather_query_location(query)
+            if query_location:
+                return {
+                    "date_mode": self._weather_date_mode(query),
+                    "language": "pt-BR",
+                    "location_status": "known_without_coordinates",
+                    "query_location": query_location,
+                    "location_label": self._location_label(query_location),
+                }
             return {
                 "date_mode": self._weather_date_mode(query),
                 "language": "pt-BR",
@@ -287,6 +296,14 @@ class SourceManager:
             "language": "pt-BR",
             "location": location,
         }
+
+    def _weather_query_location(self, query):
+        manager = getattr(self, "location_manager", None)
+        if manager and hasattr(manager, "parse_weather_query_location"):
+            location = manager.parse_weather_query_location(query)
+            if location and location.get("city"):
+                return location
+        return {}
 
     def _weather_location(self):
         manager = getattr(self, "location_manager", None)
@@ -325,7 +342,13 @@ class SourceManager:
 
     def _missing_weather_location_response(self, request, module_proposal=None):
         manager = getattr(self, "location_manager", None)
-        if manager and hasattr(manager, "weather_missing_response"):
+        if request.get("query_location"):
+            label = request.get("location_label") or self._location_label(request.get("query_location"))
+            response = (
+                f"Entendi que você quer o clima para {label}, mas ainda não tenho coordenadas nem geocoder habilitado para essa cidade. "
+                "Não vou inventar latitude/longitude. Posso criar uma proposta de módulo GeocodingConnector para transformar cidade em coordenadas com validação humana."
+            )
+        elif manager and hasattr(manager, "weather_missing_response"):
             response = manager.weather_missing_response()
         else:
             response = (
@@ -336,6 +359,15 @@ class SourceManager:
         if request.get("location_status") == "known_without_coordinates" and module_proposal:
             response += f"\nProposta sugerida: {module_proposal.get('title')} ({module_proposal.get('status')})."
         return response
+
+    def _location_label(self, location):
+        location = dict(location or {})
+        parts = [
+            str(location.get("city") or "").strip(),
+            str(location.get("state") or "").strip(),
+            str(location.get("country") or "").strip(),
+        ]
+        return ", ".join(part for part in parts if part) or "localização informada"
 
     def _weather_date_mode(self, query):
         normalized = str(query or "").lower()

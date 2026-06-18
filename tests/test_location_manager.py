@@ -39,6 +39,30 @@ class LocationManagerTests(unittest.TestCase):
         self.assertEqual(previous["city"], "São Paulo")
         self.assertIn("Não tenho", manager.describe())
 
+    def test_location_parser_accepts_natural_city_phrases(self):
+        manager = LocationManager(store=LocationStore())
+
+        cases = [
+            "Use embu das artes Sp como minha localização.",
+            "Use a cidade de Embu das artes",
+            "registre que a gente mora na cidade de Embu das Artes, SP",
+            "Registr que a gente mora na cidade de embu das artes.",
+        ]
+
+        for text in cases:
+            parsed = manager.parse_location_text(text)
+            self.assertEqual(parsed["city"], "Embu das Artes")
+            if "SP" in text or "Sp" in text:
+                self.assertEqual(parsed["state"], "SP")
+
+    def test_weather_query_city_is_understood_without_coordinates(self):
+        manager = LocationManager(store=LocationStore())
+
+        parsed = manager.parse_weather_query_location("busque o clima para a cidade de embu das artes")
+
+        self.assertEqual(parsed["city"], "Embu das Artes")
+        self.assertEqual(parsed["precision"], "city")
+
     def test_athena_asks_for_location_when_weather_has_no_location(self):
         with tempfile.TemporaryDirectory() as tmp:
             athena = make_athena(Path(tmp))
@@ -57,12 +81,13 @@ class LocationManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             athena = make_athena(Path(tmp))
             try:
-                response = athena.chat("minha localização é São Paulo, SP")
-                self.assertIn("Salvei sua localização padrão como São Paulo, SP", response)
+                response = athena.chat("Use Embu das artes, Sp como minha localização padrão")
+                self.assertIn("Salvei sua localização padrão como Embu das Artes, SP", response)
                 self.assertIn("não tem coordenadas", response)
+                self.assertIsNotNone(athena.pending_module_proposal)
 
                 response = athena.chat("qual localização você tem salva?")
-                self.assertIn("São Paulo, SP", response)
+                self.assertIn("Embu das Artes, SP", response)
                 self.assertIn("Consentimento: granted", response)
 
                 response = athena.chat("apague minha localização")
@@ -75,7 +100,7 @@ class LocationManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             athena = make_athena(Path(tmp))
             try:
-                athena.chat("use São Paulo, SP como minha localização padrão")
+                athena.chat("use Embu das artes, SP como minha localização")
                 response = athena.chat("Qual a previsão do clima amanhã?")
                 metadata = athena.last_response_metadata
 
@@ -87,10 +112,41 @@ class LocationManagerTests(unittest.TestCase):
                 self.assertEqual(metadata["llm_calls"], 0)
                 self.assertIsNotNone(athena.pending_module_proposal)
 
-                response = athena.chat("Sim")
+                response = athena.chat("Ok, pode criar o GeocodingConnector, se necessário.")
                 self.assertIn("GeocodingConnector", response)
                 proposals = athena.source_manager.list_module_proposals()
                 self.assertEqual(proposals[0]["title"], "GeocodingConnector")
+            finally:
+                athena.memory.close()
+
+    def test_weather_query_with_city_creates_geocoding_proposal_without_default_location(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            athena = make_athena(Path(tmp))
+            try:
+                response = athena.chat("busque o clima para a cidade de embu das artes")
+                metadata = athena.last_response_metadata
+
+                self.assertEqual(metadata["route"], "external_information")
+                self.assertEqual(metadata["source_status"], "missing_geocoder")
+                self.assertEqual(metadata["module_proposal_title"], "GeocodingConnector")
+                self.assertIn("Embu das Artes", response)
+                self.assertIn("GeocodingConnector", response)
+                self.assertEqual(metadata["llm_calls"], 0)
+                self.assertIsNotNone(athena.pending_module_proposal)
+            finally:
+                athena.memory.close()
+
+    def test_living_in_city_phrase_saves_location_with_consent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            athena = make_athena(Path(tmp))
+            try:
+                response = athena.chat("registre que a gente mora na cidade de embu das artes.")
+
+                self.assertIn("Salvei sua localização padrão como Embu das Artes", response)
+                self.assertEqual(athena.last_response_metadata["llm_calls"], 0)
+                saved = athena.location_manager.current()
+                self.assertEqual(saved["city"], "Embu das Artes")
+                self.assertEqual(saved["consent_status"], "granted")
             finally:
                 athena.memory.close()
 
