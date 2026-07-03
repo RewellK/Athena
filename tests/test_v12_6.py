@@ -72,7 +72,49 @@ class AthenaV126Tests(unittest.TestCase):
         self.assertEqual(metadata["intent"], "entity_query")
         self.assertEqual(metadata["target"], "Fernanda")
         self.assertIn("Ainda não tenho informações suficientes", response)
+        self.assertIn("Quer me contar quem é Fernanda", response)
         self.assertNotIn("Não entendi", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+    def test_weak_generic_relation_does_not_become_raw_entity_answer(self):
+        self.athena.world_model.apply_extraction({
+            "entities": [
+                {"name": "user", "type": "person", "confidence": 0.70},
+                {"name": "Fernanda", "type": "person", "confidence": 0.70},
+            ],
+            "relationships": [
+                {"source": "user", "relation": "relates_to", "target": "Fernanda", "confidence": 0.60}
+            ],
+            "events": [],
+            "states": [],
+        })
+        self.athena.llm_provider.reset_calls()
+
+        response = self.athena.chat("quem é fernanda?")
+        metadata = self.athena.last_response_metadata
+
+        self.assertEqual(metadata["route"], "world_query")
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("Ainda não tenho informações suficientes sobre Fernanda", response)
+        self.assertIn("Quer me contar quem é Fernanda", response)
+        self.assertNotIn("user relates", response.lower())
+        self.assertEqual(metadata["llm_calls"], 0)
+
+    def test_entity_explanation_and_single_recent_entity_route_locally(self):
+        response = self.athena.chat("pode me explicar Fernanda")
+        metadata = self.athena.last_response_metadata
+
+        self.assertEqual(metadata["route"], "world_query")
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("Quer me contar quem é Fernanda", response)
+        self.assertEqual(metadata["llm_calls"], 0)
+
+        response = self.athena.chat("Fernanda")
+        metadata = self.athena.last_response_metadata
+
+        self.assertEqual(metadata["route"], "world_query")
+        self.assertEqual(metadata["target"], "Fernanda")
+        self.assertIn("Quer me contar quem é Fernanda", response)
         self.assertEqual(metadata["llm_calls"], 0)
 
     def test_llm_unavailable_learning_candidate_does_not_fall_to_unknown(self):

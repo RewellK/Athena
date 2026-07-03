@@ -3,7 +3,7 @@
     "ollamaUrl": "http://localhost:11434/api/generate",
     "ollamaModel": "qwen2.5:3b",
     "voiceEnabled": true,
-    "voiceProvider": "openai_tts",
+    "voiceProvider": "online_tts",
     "fallbackVoiceProvider": "macos_say",
     "piperCommand": "piper",
     "piperModelPath": "",

@@ -692,9 +692,9 @@ class Athena:
             )
             if entity_answer:
                 return entity_answer
-            return f"Ainda não tenho informações suficientes sobre {target}."
+            return self._unknown_entity_follow_up(target)
 
-        return "Ainda não tenho informações suficientes sobre essa pessoa ou entidade."
+        return "Ainda não tenho informações suficientes sobre essa pessoa ou entidade. Quer me contar quem é e qual é a relação com você?"
 
 
     def _handle_world_query(self, intention, user_input):
@@ -704,7 +704,7 @@ class Athena:
             relation_answer = self._answer_user_relation_query(target)
             if relation_answer:
                 return relation_answer
-            return f"Ainda não tenho informações suficientes sobre {target}."
+            return self._unknown_entity_follow_up(target)
         if target:
             entity_answer = self._describe_entity_from_memory(
                 target,
@@ -713,11 +713,18 @@ class Athena:
             )
             if entity_answer:
                 return entity_answer
-            return f"Ainda não tenho informações suficientes sobre {target}."
+            return self._unknown_entity_follow_up(target)
         response = self.world_model.answer(user_input)
         if response:
             return response
         return None
+
+    def _unknown_entity_follow_up(self, target):
+        display_target = self._display_entity_label(target)
+        return (
+            f"Ainda não tenho informações suficientes sobre {display_target}. "
+            f"Quer me contar quem é {display_target} e qual é a relação com você?"
+        )
 
     def _describe_entity_from_memory(self, target, technical=False, user_input=""):
         rows = self.memory.find_entities(name_fragment=target, limit=10)
@@ -759,11 +766,18 @@ class Athena:
         return "\n".join(lines)
 
     def _format_entity_natural(self, user_input, name, entity_type, relationships, states, events):
+        strong_relationships = [
+            row for row in relationships
+            if not self._is_weak_relationship(row[2])
+        ]
+        if not strong_relationships and not states and not events:
+            return self._insufficient_entity_knowledge(name, relationships)
+
         facts = {
             "entity": {"name": name, "type": entity_type},
             "relationships": [
                 {"source": source, "relation": relation, "target": target, "confidence": confidence}
-                for _id, source, relation, target, confidence, _created_at in relationships[:12]
+                for _id, source, relation, target, confidence, _created_at in strong_relationships[:12]
             ],
             "states": [
                 {"entity": entity, "attribute": attribute, "value": value, "confidence": confidence}
@@ -775,7 +789,7 @@ class Athena:
             ],
         }
         if self.settings.get("fastMemoryResponses", True):
-            fast_response = self._format_entity_fast_natural(name, entity_type, relationships, states, events)
+            fast_response = self._format_entity_fast_natural(name, entity_type, strong_relationships, states, events)
             if fast_response:
                 return fast_response
 
@@ -801,9 +815,13 @@ Fatos estruturados:
             except Exception as error:
                 self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "format_entity_natural"})
 
-        lines = [f"Pelo que sei, {name} está registrado como {entity_type}."]
-        if relationships:
-            relation_text = ", ".join(f"{source} {relation.replace('_', ' ')} {target}" for _id, source, relation, target, _confidence, _created_at in relationships[:4])
+        display_name = self._display_entity_label(name)
+        lines = [f"Pelo que sei, {display_name} está registrado como {entity_type}."]
+        if strong_relationships:
+            relation_text = ", ".join(
+                f"{self._display_entity_label(source)} {relation.replace('_', ' ')} {self._display_entity_label(target)}"
+                for _id, source, relation, target, _confidence, _created_at in strong_relationships[:4]
+            )
             lines.append(f"Também sei que: {relation_text}.")
         if states:
             state_text = ", ".join(f"{entity} tem {attribute.replace('_', ' ')} {value}" for _id, entity, attribute, value, _source_event, _confidence, _created_at, _updated_at in states[:4])
@@ -821,40 +839,102 @@ Fatos estruturados:
                 seen.add(marker)
                 sentences.append(sentence)
         if not sentences:
+            display_name = self._display_entity_label(name)
             if states:
                 state_parts = [
                     f"{entity} tem {attribute.replace('_', ' ')} {value}"
                     for _id, entity, attribute, value, _source_event, _confidence, _created_at, _updated_at in states[:3]
                 ]
-                return f"Pelo que sei, {name} está registrado como {entity_type}. Também sei que: {', '.join(state_parts)}."
-            return f"Pelo que sei, {name} está registrado como {entity_type}, mas ainda tenho poucos detalhes."
+                return f"Pelo que sei, {display_name} está registrado como {entity_type}. Também sei que: {', '.join(state_parts)}."
+            return f"Pelo que sei, {display_name} está registrado como {entity_type}, mas ainda tenho poucos detalhes."
         return " ".join(sentences[:4])
 
     def _relationship_sentence(self, name, source, relation, target, creator):
         relation = str(relation or "").strip()
         source = str(source or "").strip()
         target = str(target or "").strip()
-        if relation == "father_of" and source == name and target == creator:
-            return f"{name} é seu pai."
-        if relation == "girlfriend_of" and source == name and target == creator:
-            return f"{name} é sua namorada."
-        if relation == "future_spouse_of" and source == name and target == creator:
-            return f"Você me contou que pretende se casar com {name}."
-        if relation == "plans_to_marry" and source == creator and target == name:
-            return f"Você me contou que pretende se casar com {name}."
-        if relation == "love_of_life_of" and source == name and target == creator:
-            return f"Você disse que {name} é o amor da sua vida."
-        if relation == "emotionally_important_to" and source == name and target == creator:
-            return f"{name} é alguém emocionalmente importante para você."
-        if relation == "interested_in" and source == name:
-            return f"{name} gosta de {target}."
-        if relation == "owns" and source == name:
-            return f"{name} tem um {target}."
-        if source == name:
-            return f"{name} {relation.replace('_', ' ')} {target}."
-        if target == name:
-            return f"{source} {relation.replace('_', ' ')} {name}."
+        if self._is_weak_relationship(relation):
+            return ""
+        display_name = self._display_entity_label(name)
+        display_source = self._display_entity_label(source)
+        display_target = self._display_relation_object(target)
+        source_is_name = self._same_entity(source, name)
+        target_is_name = self._same_entity(target, name)
+        target_is_user = self._is_user_alias(target, creator)
+        source_is_user = self._is_user_alias(source, creator)
+        if relation == "father_of" and source_is_name and target_is_user:
+            return f"{display_name} é seu pai."
+        if relation == "girlfriend_of" and source_is_name and target_is_user:
+            return f"{display_name} é sua namorada."
+        if relation == "future_spouse_of" and source_is_name and target_is_user:
+            return f"Você me contou que pretende se casar com {display_name}."
+        if relation == "plans_to_marry" and source_is_user and target_is_name:
+            return f"Você me contou que pretende se casar com {display_name}."
+        if relation == "love_of_life_of" and source_is_name and target_is_user:
+            return f"Você disse que {display_name} é o amor da sua vida."
+        if relation == "emotionally_important_to" and source_is_name and target_is_user:
+            return f"{display_name} é alguém emocionalmente importante para você."
+        if relation == "interested_in" and source_is_name:
+            return f"{display_name} gosta de {display_target}."
+        if relation == "owns" and source_is_name:
+            return f"{display_name} tem um {display_target}."
+        if source_is_name:
+            return f"{display_name} {relation.replace('_', ' ')} {display_target}."
+        if target_is_name:
+            return f"{display_source} {relation.replace('_', ' ')} {display_name}."
         return ""
+
+    def _is_weak_relationship(self, relation):
+        normalized = str(relation or "").strip().lower()
+        return normalized in {
+            "related_to",
+            "relates_to",
+            "relates",
+            "relation",
+            "associated_with",
+            "mentions",
+            "mentioned",
+            "about",
+        }
+
+    def _insufficient_entity_knowledge(self, name, relationships=None):
+        display_name = self._display_entity_label(name)
+        if relationships:
+            return (
+                f"Ainda não tenho informações suficientes sobre {display_name}. "
+                "Só encontrei uma menção ou vínculo genérico, não uma descrição confiável. "
+                f"Quer me contar quem é {display_name} e qual é a relação com você?"
+            )
+        return (
+            f"Ainda não tenho informações suficientes sobre {display_name}. "
+            f"Quer me contar quem é {display_name} e qual é a relação com você?"
+        )
+
+    def _display_entity_label(self, value):
+        value = " ".join(str(value or "").strip().split())
+        if not value:
+            return ""
+        if value.islower() or value.isupper():
+            words = value.title().split()
+            particles = {"Da", "De", "Do", "Das", "Dos", "E"}
+            return " ".join(word.lower() if index > 0 and word in particles else word for index, word in enumerate(words))
+        return value
+
+    def _display_relation_object(self, value):
+        value = " ".join(str(value or "").strip().split())
+        if not value:
+            return ""
+        if value.islower() and len(value.split()) <= 3:
+            return value
+        return self._display_entity_label(value)
+
+    def _same_entity(self, left, right):
+        return self._normalize_local_phrase(left) == self._normalize_local_phrase(right)
+
+    def _is_user_alias(self, value, creator):
+        normalized = self._normalize_local_phrase(value)
+        aliases = {"user", "usuario", "usuário", self._normalize_local_phrase(creator)}
+        return normalized in aliases
 
 
     def _handle_external_information_route(self, intention, user_input="", metadata=None):

@@ -699,6 +699,13 @@ class CognitiveControlEngine:
         return None
 
     def _extract_entity_target(self, words, session_context=None):
+        if len(words) == 1:
+            if words[0] in {"sim", "ok", "okay", "claro", "beleza", "certo", "perfeito", "entendi", "nao", "não", "oi", "ola", "opa", "eai", "bom", "boa"}:
+                return ""
+            resolved = self._resolve_contextual_target(words[0], session_context)
+            if resolved:
+                return resolved
+
         for index in range(len(words) - 2):
             if words[index] == "quem" and words[index + 1] in {"e", "eh"}:
                 return self._resolve_contextual_target(self._target_from_words(words[index + 2 :]), session_context)
@@ -709,6 +716,10 @@ class CognitiveControlEngine:
 
         for index, word in enumerate(words):
             if word == "sobre" and index + 1 < len(words):
+                return self._resolve_contextual_target(self._target_from_words(words[index + 1 :]), session_context)
+
+        for index, word in enumerate(words):
+            if word in {"explicar", "explique", "explica"} and index + 1 < len(words):
                 return self._resolve_contextual_target(self._target_from_words(words[index + 1 :]), session_context)
 
         for index in range(len(words) - 2):
@@ -828,6 +839,8 @@ class CognitiveControlEngine:
     def _looks_like_entity_information_request(self, words):
         word_set = set(words)
         if "sobre" in word_set and (word_set & {"sabe", "saber", "fala", "fale", "falar", "conte", "contar"}):
+            return True
+        if word_set & {"explicar", "explique", "explica"}:
             return True
         if words[:2] in (["me", "fala"], ["me", "fale"]) and len(words) >= 3:
             return True
