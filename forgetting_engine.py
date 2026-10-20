@@ -5,8 +5,10 @@ class ForgettingEngine:
 
     def forget_expired(self):
         return {
-            "short_term_deleted": self.memory.expire_short_term_memory(),
-            "mid_term_deleted": self.memory.expire_mid_term_memory(),
+            "short_term_archived": self.memory.expire_short_term_memory(),
+            "mid_term_archived": self.memory.expire_mid_term_memory(),
+            "short_term_deleted": 0,
+            "mid_term_deleted": 0,
         }
 
     def what_to_forget(self):

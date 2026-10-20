@@ -47,8 +47,7 @@ class ActionEngine:
             if row_plan_id != plan_id:
                 continue
             summary = "Ação aprovada registrada. Execução externa permanece controlada nesta versão."
-            self.memory.update_action_status(action_id, "approved", summary, executed=True)
-            self.memory.mark_tool_used(tool_id, success=True)
+            self.memory.update_action_status(action_id, "approved", summary, executed=False)
             self.memory.save_outcome(action_id, "approved", summary, "A V11 registrou aprovação humana antes de ação permanente.")
             executed.append(description)
         return executed

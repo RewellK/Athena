@@ -1,4 +1,5 @@
 import tkinter.messagebox as messagebox
+import tkinter.filedialog as filedialog
 import customtkinter as ctk
 
 
@@ -6,53 +7,25 @@ class SettingsPanel(ctk.CTkFrame):
     """Runtime settings surface. Boolean flags are edited through checkboxes."""
 
     BOOLEAN_FLAGS = [
-        ("messageReceivedSoundEnabled", "Som ao enviar mensagem", ""),
-        ("debugMode", "Modo debug", ""),
-        ("showRouteMetadata", "Mostrar rota/tempo no chat", ""),
-        ("useNaturalResponses", "Respostas naturais", ""),
-        ("useFastConversationPath", "Caminho rápido conversacional", ""),
-        ("fastPathEnabled", "Fast paths ativos", ""),
-        ("fastPathGreetings", "Fast path de saudação", ""),
-        ("fastPathEntityQueries", "Fast path de consulta local", ""),
-        ("useLLMIntentResolution", "Resolver intenção com LLM", ""),
-        (
-            "allowLocalIntentFallback",
-            "Fallback local de intenção",
-            "Essa opção reativa fallback local para intenção. Use apenas em emergência, pois pode enfraquecer a arquitetura LLM-first.",
-        ),
-        ("voiceEnabled", "Voz ativa", ""),
-        ("voiceSpeakResponses", "Falar respostas", ""),
-        ("voiceSpeakStartupGreeting", "Falar saudação inicial", ""),
-        ("startupGreetingEnabled", "Saudação inicial na GUI", ""),
-        ("startupGreetingSpeak", "Voz na saudação inicial", ""),
-        (
-            "pendingConfirmationBlocksConversation",
-            "Confirmação pendente bloqueia conversa",
-            "Essa opção reativa o comportamento antigo em que uma confirmação pendente bloqueia novos assuntos.",
-        ),
-        ("useLLM", "Usar LLM", ""),
-        ("confirmExternalKnowledge", "Confirmar conhecimento externo", ""),
-        (
-            "autoIngestExternalKnowledge",
-            "Ingestão externa automática",
-            "Essa opção permite ingestão automática de conhecimento externo. Recomenda-se manter desligada.",
-        ),
-        (
-            "enableLegacyParsers",
-            "Parsers legados",
-            "Essa opção reativa parsers antigos. Isso pode violar a arquitetura LLM-first.",
-        ),
-        (
-            "useRegexFallback",
-            "Fallback por regex",
-            "Essa opção permite fallback por regex. Deve ser usado apenas para emergência.",
-        ),
-        ("enableAgency", "Agência ativa", ""),
-        ("enableProactivity", "Proatividade ativa", ""),
+        ('useLLM','Modelo local ativo',''),
+        ('localAutonomyEnabled','Executar ferramentas locais',''),
+        ('autonomousLocalSkillLearning','Aprender procedimentos verificados',''),
+        ('residentGoalsEnabled','Executar objetivos colocados na fila',''),
+        ('computerToolsEnabled','Usar aplicativos do macOS',''),
+        ('browserToolsEnabled','Navegador isolado',''),
+        ('browserInteractionEnabled','Preencher campos e clicar em botões',''),
+        ('allowExternalRequests','Consultar páginas públicas',''),
+        ('voiceEnabled','Voz ativa',''),
+        ('voiceSpeakResponses','Falar respostas',''),
+        ('localSpeechInputEnabled','Entrada de voz local',''),
+        ('voiceAutoSend','Enviar fala sem revisar transcrição',''),
+        ('messageReceivedSoundEnabled','Som ao enviar mensagem',''),
+        ('showRouteMetadata','Mostrar detalhes da execução',''),
     ]
 
-    VOICE_PROVIDERS = ["none", "macos_say", "piper", "online_tts", "openai_tts"]
+    VOICE_PROVIDERS = ["none", "macos_say", "piper"]
     SOUND_PROVIDERS = ["system_beep", "terminal_bell"]
+    MODEL_PROFILES = {"Experimental (2B)":"qwen3.5:2b", "Mais capacidade (4B)":"qwen3.5:4b", "Compatibilidade (3B)":"qwen2.5:3b"}
 
     def __init__(self, master, athena, on_refresh=None):
         super().__init__(master)
@@ -63,6 +36,8 @@ class SettingsPanel(ctk.CTkFrame):
         self.title = ctk.CTkLabel(self, text="Configurações", font=ctk.CTkFont(size=18, weight="bold"))
         self.title.pack(anchor="w", padx=8, pady=(12, 8))
 
+        self.folder_button=ctk.CTkButton(self,text='Autorizar pasta de trabalho...',command=self.authorize_folder)
+        self.folder_button.pack(fill='x',padx=8,pady=4)
         self.checkbox_frame = ctk.CTkScrollableFrame(self, height=280)
         self.checkbox_frame.pack(fill="x", padx=8, pady=4)
 
@@ -98,6 +73,10 @@ class SettingsPanel(ctk.CTkFrame):
             command=self.change_sound_provider,
         )
         self.sound_provider_menu.grid(row=1, column=1, sticky="ew", padx=8, pady=4)
+        ctk.CTkLabel(self.voice_frame,text='Modelo local').grid(row=2,column=0,sticky='w',padx=8,pady=4)
+        self.model_var=ctk.StringVar(value=self.model_label())
+        self.model_menu=ctk.CTkOptionMenu(self.voice_frame,values=list(self.MODEL_PROFILES),variable=self.model_var,command=self.change_model)
+        self.model_menu.grid(row=2,column=1,sticky='ew',padx=8,pady=4)
         self.voice_frame.grid_columnconfigure(1, weight=1)
 
         self.info = ctk.CTkTextbox(self, wrap="word")
@@ -105,6 +84,22 @@ class SettingsPanel(ctk.CTkFrame):
 
         self.refresh_button = ctk.CTkButton(self, text="Atualizar configurações", command=self.refresh)
         self.refresh_button.pack(fill="x", padx=8, pady=(0, 8))
+
+    def authorize_folder(self):
+        folder=filedialog.askdirectory(title='Escolha uma pasta que Athena poderá ler e criar arquivos')
+        if folder:
+            roots=dict(self.athena.settings.get('fileRoots',{}))
+            roots['user']=folder
+            self.athena.settings.set('fileRoots',roots)
+            self.refresh()
+
+    def model_label(self):
+        selected=self.athena.settings.get('ollamaModel')
+        return next((label for label,model in self.MODEL_PROFILES.items() if model==selected),str(selected))
+
+    def change_model(self,label):
+        self.athena.settings.set('ollamaModel',self.MODEL_PROFILES[label])
+        self.refresh()
 
     def toggle_flag(self, key, warning):
         value = bool(self.vars[key].get())
@@ -115,6 +110,10 @@ class SettingsPanel(ctk.CTkFrame):
                 value = False
 
         self.athena.settings.set(key, value)
+        if not value and key in {'useLLM','localAutonomyEnabled','residentGoalsEnabled'}:
+            self.athena.cancel_current_turn(reason='pause')
+        if not value and key=='voiceEnabled':
+            self.athena.voice_engine.stop()
 
         if key == "enableAgency":
             self.athena.settings.set("agencyEnabled", value)
@@ -138,6 +137,7 @@ class SettingsPanel(ctk.CTkFrame):
         for key, variable in self.vars.items():
             variable.set(bool(self.athena.settings.get(key, False)))
         self.voice_provider_var.set(str(self.athena.settings.get("voiceProvider", "macos_say")))
+        self.model_var.set(self.model_label())
         self.sound_provider_var.set(str(self.athena.settings.get("messageReceivedSoundProvider", "system_beep")))
         lines = [
             "CONFIGURAÇÕES ATUAIS",

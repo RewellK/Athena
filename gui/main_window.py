@@ -21,6 +21,7 @@ class AthenaDesktopApp(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.athena = Athena()
+        self.athena.start_foreground_presence()
         self.task_runner = BackgroundTaskRunner(self.athena.logger)
         self.grid_columnconfigure(0, weight=3)
         self.grid_columnconfigure(1, weight=2)
@@ -35,7 +36,7 @@ class AthenaDesktopApp(ctk.CTk):
         self.status_tab = self.side_tabs.add("Status")
         self.memory_tab = self.side_tabs.add("Memória")
         self.world_tab = self.side_tabs.add("Mundo")
-        self.agency_tab = self.side_tabs.add("Agência")
+        self.agency_tab = self.side_tabs.add("Tarefas")
         self.settings_tab = self.side_tabs.add("Config")
 
         self.self_status_panel = SelfStatusPanel(self.status_tab, self.athena, self.task_runner)
@@ -47,7 +48,7 @@ class AthenaDesktopApp(ctk.CTk):
         self.world_model_panel = WorldModelPanel(self.world_tab, self.athena)
         self.world_model_panel.pack(fill="both", expand=True, padx=8, pady=8)
 
-        self.agency_panel = AgencyPanel(self.agency_tab, self.athena)
+        self.agency_panel = AgencyPanel(self.agency_tab, self.athena, self.task_runner)
         self.agency_panel.pack(fill="both", expand=True, padx=8, pady=8)
 
         self.settings_panel = SettingsPanel(self.settings_tab, self.athena, self.refresh_all)
@@ -58,6 +59,11 @@ class AthenaDesktopApp(ctk.CTk):
 
     def show_startup_greeting(self):
         if not self.athena.settings.get("startupGreetingEnabled", True):
+            return
+        if self.athena.settings.get('agentBackend','legacy')=='openjarvis':
+            self.chat_panel._set_status('Athena pronta. Presença local ativa.')
+            if self.athena.settings.get('startupGreetingSpeak',False):
+                self.athena.voice_engine.speak_startup('Athena pronta.')
             return
         try:
             speak = bool(

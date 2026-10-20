@@ -16,3 +16,6 @@ backups/
 tmp/
 temp/
 *.tmp
+
+.athena_workspace/
+venv/

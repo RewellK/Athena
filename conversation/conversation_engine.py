@@ -17,11 +17,17 @@ class ConversationEngine:
         route = (route_result or {}).get("route", "conversation")
         operation = ""
         structured = (route_result or {}).get("structured_request") if isinstance((route_result or {}).get("structured_request"), dict) else {}
+        direct = structured.get("direct_reply")
+        if route in {"greeting", "small_talk", "conversation"} and isinstance(direct, str) and direct.strip():
+            return direct.strip()
         operation = structured.get("operation") or (route_result or {}).get("operation") or ""
         if operation == "acknowledgement":
             return "Certo."
         if route == "greeting":
-            return self.natural.greeting()
+            draft = self.natural.greeting()
+            if self.settings and self.settings.get("naturalGreetingEnabled", False):
+                return self.natural.naturalize(user_input, draft, intent="greeting")
+            return draft
         if route == "small_talk":
             return self.natural.small_talk(user_input, self._health_summary())
         if route == "conversation":

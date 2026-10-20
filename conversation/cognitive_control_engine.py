@@ -31,6 +31,18 @@ class CognitiveControlEngine:
         self.settings = settings
         self.command_interpreter = CommandInterpreter()
 
+    def classify_controls(self, user_input, pending_state=None, session_context=None):
+        """Only command grammar and administrative operations bypass the LLM."""
+        words = self._words(user_input)
+        pending = self._pending_confirmation(words, pending_state)
+        if pending:
+            return pending
+        for resolver in (self._command_palette_route, self._runtime_status_route, self._admin_route):
+            result = resolver(user_input, words, session_context)
+            if result:
+                return result
+        return None
+
     def classify(self, user_input, pending_state=None, session_context=None):
         words = self._words(user_input)
         if not words:

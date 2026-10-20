@@ -468,7 +468,20 @@ class MemoryDB:
         )
         """)
 
+        for table in ("short_term_memory", "mid_term_memory"):
+            self._ensure_column(table, "archived", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(table, "last_seen_at", "TEXT")
+        self._ensure_column("short_term_memory", "seen_count", "INTEGER NOT NULL DEFAULT 1")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS short_expiry ON short_term_memory(archived,expires_at)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS mid_expiry ON mid_term_memory(archived,expires_at)")
+        self.conn.execute("CREATE TABLE IF NOT EXISTS memory_evidence(short_id INTEGER,mid_id INTEGER,observations INTEGER,last_linked_at TEXT,PRIMARY KEY(short_id,mid_id))")
+        from memory.search import initialize
+        self.fts_available = initialize(self)
         self.conn.commit()
+
+    def search_memory(self, query, limit=10):
+        from memory.search import retrieve
+        return retrieve(self, query, limit)
 
     def _ensure_column(self, table, column, definition):
         cursor = self.conn.cursor()
@@ -688,8 +701,12 @@ class MemoryDB:
         clean_content = content.strip()
         self.conn.execute(
             """
-            INSERT OR IGNORE INTO short_term_memory(content, content_hash, created_at, expires_at, importance_score, processed)
+            INSERT INTO short_term_memory(content, content_hash, created_at, expires_at, importance_score, processed)
             VALUES (?, ?, ?, ?, ?, 0)
+            ON CONFLICT(content_hash) DO UPDATE SET
+                seen_count=short_term_memory.seen_count+1,last_seen_at=excluded.created_at,
+                expires_at=excluded.expires_at,importance_score=MAX(short_term_memory.importance_score,excluded.importance_score),
+                archived=0,processed=0
             """,
             (
                 clean_content,
@@ -709,7 +726,7 @@ class MemoryDB:
         query = "SELECT id, content, content_hash, created_at, expires_at, importance_score, processed FROM short_term_memory WHERE 1=1"
         params = []
         if not include_expired:
-            query += " AND expires_at > ?"
+            query += " AND archived = 0 AND expires_at > ?"
             params.append(self._now())
         if processed is not None:
             query += " AND processed = ?"
@@ -728,7 +745,7 @@ class MemoryDB:
 
     def expire_short_term_memory(self):
         cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM short_term_memory WHERE expires_at <= ?", (self._now(),))
+        cursor.execute("UPDATE short_term_memory SET archived=1 WHERE archived=0 AND expires_at <= ?", (self._now(),))
         deleted = cursor.rowcount
         self.conn.commit()
         return deleted
@@ -740,8 +757,12 @@ class MemoryDB:
         clean_summary = summary.strip()
         self.conn.execute(
             """
-            INSERT OR IGNORE INTO mid_term_memory(summary, topics, source_count, created_at, expires_at, importance_score, promoted)
+            INSERT INTO mid_term_memory(summary, topics, source_count, created_at, expires_at, importance_score, promoted)
             VALUES (?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(summary) DO UPDATE SET
+                source_count=MAX(mid_term_memory.source_count,excluded.source_count),
+                importance_score=MAX(mid_term_memory.importance_score,excluded.importance_score),
+                expires_at=excluded.expires_at,last_seen_at=excluded.created_at,archived=0
             """,
             (
                 clean_summary,
@@ -762,7 +783,7 @@ class MemoryDB:
         query = "SELECT id, summary, topics, source_count, created_at, expires_at, importance_score, promoted FROM mid_term_memory WHERE 1=1"
         params = []
         if not include_expired:
-            query += " AND expires_at > ?"
+            query += " AND archived = 0 AND expires_at > ?"
             params.append(self._now())
         if promoted is not None:
             query += " AND promoted = ?"
@@ -778,7 +799,7 @@ class MemoryDB:
 
     def expire_mid_term_memory(self):
         cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM mid_term_memory WHERE expires_at <= ? AND promoted = 0", (self._now(),))
+        cursor.execute("UPDATE mid_term_memory SET archived=1 WHERE archived=0 AND expires_at <= ? AND promoted = 0", (self._now(),))
         deleted = cursor.rowcount
         self.conn.commit()
         return deleted

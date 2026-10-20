@@ -30,6 +30,45 @@ class ChatPanel(ctk.CTkFrame):
 
         self.send_button = ctk.CTkButton(self, text="Enviar", command=self.send_message)
         self.send_button.grid(row=3, column=1, sticky="e", padx=(6, 12), pady=(6, 12))
+        self.stop_button = ctk.CTkButton(self, text="Interromper / parar voz", command=self.interrupt)
+        self.stop_button.grid(row=4, column=0, sticky="w", padx=12, pady=(0, 8))
+        self.voice_button = ctk.CTkButton(self, text="Falar (6 segundos)", command=self.voice_message)
+        self.voice_button.grid(row=4, column=1, padx=12, pady=(0, 8))
+
+    def interrupt(self):
+        if hasattr(self,'voice_input'):
+            self.voice_input.cancel()
+        self.athena.cancel_current_turn()
+        self._set_status("Interrupção solicitada. Ações em andamento podem precisar terminar.")
+
+    def voice_message(self):
+        if self.processing:
+            return
+        self._set_processing(True)
+        self._set_status('Ouvindo por 6 segundos...')
+        def work():
+            from voice.local_input import LocalVoiceInput
+            if not hasattr(self, 'voice_input'):
+                self.voice_input = LocalVoiceInput(self.athena.settings)
+            transcript = self.voice_input.record()['text']
+            self.after(0, lambda: self._append('Você (voz)', transcript))
+            self.after(0, lambda: self._set_status('Athena está processando...'))
+            if self.athena.settings.get('voiceAutoSend',False):
+                return self.athena.chat(transcript)
+            return {'transcript':transcript}
+        def success(response):
+            if isinstance(response,dict) and 'transcript' in response:
+                def preview():
+                    self._set_processing(False)
+                    self.entry.delete(0,'end');self.entry.insert(0,response['transcript'])
+                    self._set_status('Confira a transcrição e envie quando estiver correta.')
+                self.after(0,preview)
+            else:
+                self.after(0, lambda: self._finish_response(response))
+        def failure(error, _stacktrace):
+            message = 'Entrada de voz indisponível: '+str(error)
+            self.after(0, lambda: self._finish_response(message))
+        self.task_runner.submit(work, on_success=success, on_error=failure, description='local_voice_turn')
 
     def _send_event(self, _event):
         self.send_message()
@@ -71,6 +110,7 @@ class ChatPanel(ctk.CTkFrame):
         state = "disabled" if value else "normal"
         self.send_button.configure(state=state)
         self.entry.configure(state=state)
+        self.voice_button.configure(state=state)
 
     def _finish_response(self, response):
         self._append("Athena", response)

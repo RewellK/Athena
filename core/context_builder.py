@@ -7,6 +7,7 @@ class ContextBuilder:
     def build(self, user_input):
         sections = [
             self._identity_context(),
+            self._retrieved_context(user_input),
             self._definitions_context(),
             self._relationships_context(),
             self._goals_context(),
@@ -18,6 +19,15 @@ class ContextBuilder:
         ]
 
         return "\n\n".join(section for section in sections if section.strip())
+
+    def _retrieved_context(self, user_input):
+        if not hasattr(self.memory,"search_memory"):
+            return ""
+        items=self.memory.search_memory(user_input,limit=5)
+        if not items: return ""
+        lines=["MEMÓRIA RECUPERADA — curta/média são contexto candidato; só longa é consolidada:"]
+        lines.extend(f"- [{item['layer']}; confirmed={item['confirmed']}] {item['content']}" for item in items)
+        return "\n".join(lines)
 
     def _identity_context(self):
         return (

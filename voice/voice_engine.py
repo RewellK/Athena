@@ -23,6 +23,10 @@ class VoiceEngine:
             return False
         return self._submit(text)
 
+    def stop(self):
+        from voice.macos_say_provider import MacOSSayProvider
+        MacOSSayProvider.stop()
+
     def speak_startup(self, text):
         if not self.config.enabled or not self.config.speak_startup_greeting:
             return False

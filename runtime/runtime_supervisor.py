@@ -32,17 +32,21 @@ class RuntimeSupervisor:
         self.shutdown_manager = SafeShutdownManager(self.state_store, self.event_bus)
         self.loop = BackgroundCognitionLoop(self, interval_seconds=self._setting("runtimeLoopIntervalSeconds", 5))
         self.started_at = ""
+        self._running = False
+        self._failed_cycles = 0
         self._configure_default_workers(learning_harvest_worker, daily_briefing_planner)
 
     def start(self, background=None):
-        if self.get_status().get("state") not in {"offline", "stopped", "safe_mode"}:
+        if self._running:
             return self.get_status()
+        self._running = True
         now = datetime.now().isoformat(timespec="seconds")
         self.started_at = now
         self.state_store.set_state("starting", reason="runtime_start")
-        self.state_store.update(session_started_at=now, paused=False, safe_mode=False)
+        safe = self.get_status().get("safe_mode", False)
+        self.state_store.update(session_started_at=now, paused=False, safe_mode=safe)
         self.event_bus.publish("runtime_started", {"session_started_at": now})
-        self.state_store.set_state("idle", reason="runtime_ready")
+        self.state_store.set_state("safe_mode" if safe else "idle", reason="runtime_ready")
         if background is None:
             background = bool(self._setting("runtimeBackgroundLoopEnabled", False))
         if background:
@@ -63,6 +67,7 @@ class RuntimeSupervisor:
 
     def stop(self, reason="manual_stop"):
         self.loop.stop()
+        self._running = False
         return self.shutdown_manager.shutdown(reason=reason)
 
     def heartbeat(self):
@@ -81,7 +86,8 @@ class RuntimeSupervisor:
         self.state_store.set_state("processing", reason="runtime_cycle")
         self.heartbeat()
         result = self.scheduler.run_once(paused=status.get("paused"), safe_mode=status.get("safe_mode"))
-        if result.get("workers_failed", 0) >= 3:
+        self._failed_cycles = self._failed_cycles + 1 if result.get("workers_failed", 0) else 0
+        if self._failed_cycles >= 3:
             self.enter_safe_mode("falhas recorrentes de worker")
         elif not self.get_status().get("safe_mode"):
             self.state_store.set_state("idle", reason="runtime_cycle_completed")

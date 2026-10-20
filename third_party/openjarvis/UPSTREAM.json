@@ -1,0 +1,25 @@
+{
+  "repository": "https://github.com/open-jarvis/OpenJarvis",
+  "commit": "6e4defd33fb3332eed17be1169c4bb3a6e1a274c",
+  "license": "Apache-2.0",
+  "files_sha256": {
+    "core/config.py": "0db8f326da4038f16d259bc068c43897bc07bff286dd3013f3b7d08c3a69fb60",
+    "core/paths.py": "310c7bc606ab5f5dd4a9fccccd2cd3b8c09d994618634dca419d3bc3a422c81f",
+    "core/types.py": "2ec42e9c5af5e698c0a54fd18f58d6e076f88bd4b290a55c64cab0c94ec10a58",
+    "core/events.py": "2e54c24a0ac9dbc832411e8804d423b2e80c96dc9db13be1722846219f7508ac",
+    "core/registry.py": "0c30b38fa49457a48d0c4ca4e9ab70a1fe1eb7230416d4b29a015dec06ead925",
+    "agents/_stubs.py": "d6ce81720d9d184408ef0d4df8e0848b519a9d65f59d7222833814b2ff784a87",
+    "agents/orchestrator.py": "54d730bc9401dc07b1a7c0305883fb861fd501381bfce3aa738c3b0be87718e3",
+    "agents/loop_guard.py": "7da5ec256535d9687c2668e93e4f54a148119e10b073924ca4275612f027d60b",
+    "engine/_stubs.py": "e155e33c530195139851e743f8282aea068e0960f331c8ca3d716975ebeb93b5",
+    "tools/_stubs.py": "8f4f1f19ed26ee1d897abaa9e0b7bdbd134f96f7c7a3649b8e93fb3dbd0799b2",
+    "tools/description_loader.py": "6dea55c15e04240b28861e93b2ec969be66f02a366d82b551bddab6b9e360dca",
+    "security/runtime.py": "c1d8b0b47fdedc33a7918a5c4a9656f51eae6c8eb5354d97c41583445cebc351",
+    "security/taint.py": "fb61d98e0cb926674186024bb307285e1042757d0052966057fcad1dc864afb3",
+    "security/injection_scanner.py": "92b5040f8d0f91c3671399c31b75d27b049058d60387ed9f220aaf6af01e598a",
+    "security/types.py": "b115ecb07f2a940c1d76bd409ab664477cc4bc6601cdca6027b8fc46eb7c1480",
+    "security/capabilities.py": "aa7175a9bd8c6d3a7da37e8959eedc6141b341f0b6019c9773baa22c8178f8c1",
+    "_rust_bridge.py": "466d9638a6b3c2b8b86a930ea8dbe09e2c75894333c937f59700be3b3b1df51f"
+  },
+  "packaging_changes": "Package __init__.py files are Athena shims. Official runtime modules above are unchanged. Optional SDK, providers, built-in tools and telemetry are excluded."
+}
