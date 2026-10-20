@@ -3,10 +3,11 @@ from datetime import datetime
 
 class MemoryManager:
 
-    def __init__(self, memory, interpreter=None, creator_name="Rewell"):
+    def __init__(self, memory, interpreter=None, creator_name="Rewell", settings=None):
         self.memory = memory
         self.interpreter = interpreter
         self.creator_name = creator_name
+        self.settings = settings or {}
 
     def observe(self, content, relevance=None, consolidation_plan=None, follow_up_question=None):
         if relevance:
@@ -14,7 +15,7 @@ class MemoryManager:
 
         interpretation = self.interpreter.interpret(content) if self.interpreter else self._basic_interpret(content)
         score = interpretation.get("importance_score", 0)
-        memory_id = self.memory.save_short_term_memory(content, score)
+        memory_id = self.memory.save_short_term_memory(content, score, hours_to_live=self.settings.get("shortTermMemoryHours",24))
         if hasattr(self.memory, "save_memory_relevance"):
             self.memory.save_memory_relevance(
                 "short_term",
@@ -34,7 +35,7 @@ class MemoryManager:
         related_entities = relevance.get("related_entities") if isinstance(relevance.get("related_entities"), list) else []
 
         if plan.get("store_short_term", priority in {"short", "mid", "long_candidate", "long_confirm"}):
-            memory_id = self.memory.save_short_term_memory(content, score)
+            memory_id = self.memory.save_short_term_memory(content, score, hours_to_live=self.settings.get("shortTermMemoryHours",24))
             saved_layers.append("short_term")
             self.memory.save_memory_relevance(
                 "short_term",
@@ -51,6 +52,7 @@ class MemoryManager:
                 topics=related_entities,
                 source_count=1,
                 importance_score=score,
+                days_to_live=self.settings.get("midTermMemoryDays",7),
             )
             saved_layers.append("mid_term")
             self.memory.save_memory_relevance(
@@ -92,37 +94,22 @@ class MemoryManager:
 
     def promote_short_to_mid(self):
         rows = self.memory.list_short_term_memory(processed=False)
-        terms = self.memory.frequent_terms(rows, min_count=2)
         promoted_count = 0
-
-        for term, count in terms:
-            related = [row for row in rows if term in row[1].lower()]
-            if not related:
+        for row in rows:
+            source_id,content,_hash,_created,_expires,importance,_processed=row
+            observations=self.memory.conn.execute("SELECT seen_count FROM short_term_memory WHERE id=?",(source_id,)).fetchone()[0]
+            if observations < 2 and importance < 70:
                 continue
-
-            avg_score = sum(row[5] for row in related) // len(related)
-            importance = avg_score + (count * 10)
-
-            if count >= 2 or importance >= 50:
-                summary = f"'{term}' apareceu {count} vezes em memórias recentes."
-                self.memory.save_mid_term_memory(
-                    summary=summary,
-                    topics=[term],
-                    source_count=count,
-                    importance_score=importance
-                )
-                self.memory.save_memory_promotion(
-                    "short_term",
-                    "mid_term",
-                    summary,
-                    "recorrência detectada em memória curta"
-                )
-                promoted_count += 1
-
-                for row in related:
-                    self.memory.mark_short_term_processed(row[0])
-
+            mid_id=self.memory.save_mid_term_memory(content,topics=[],source_count=observations,
+                importance_score=importance,days_to_live=self.settings.get("midTermMemoryDays",7))
+            self.memory.conn.execute("INSERT INTO memory_evidence(short_id,mid_id,observations,last_linked_at) VALUES (?,?,?,?) ON CONFLICT(short_id,mid_id) DO UPDATE SET observations=excluded.observations,last_linked_at=excluded.last_linked_at",(source_id,mid_id,observations,self.memory._now()))
+            self.memory.mark_short_term_processed(source_id)
+            self.memory.save_memory_promotion("short_term","mid_term",content,"revisão por importância ou repetição do conteúdo, com origem preservada")
+            promoted_count+=1
         return promoted_count
+
+    def retrieve(self, query, limit=10):
+        return self.memory.search_memory(query,limit)
 
     def long_term_candidates(self):
         candidates = []
@@ -175,7 +162,12 @@ class MemoryManager:
         return candidates
 
     def promote_mid_to_long(self, memory_id, content, reason="confirmação do criador"):
-        self.memory.save_long_term_memory(content, source="mid_term_promotion", importance_score=90)
+        row=next((item for item in self.memory.list_mid_term_memory(include_expired=True) if item[0]==memory_id),None)
+        if row is None:
+            raise ValueError("Memória intermediária não encontrada")
+        self.memory.save_long_term_memory(content, source="mid_term_promotion", importance_score=90,
+            metadata={"origin":"mid_term_review","source_mid_id":memory_id,"approved_by":self.creator_name,
+                      "reason":reason,"approved_at":datetime.now().isoformat(timespec="seconds")})
         self.memory.save_memory("long_term_consolidation", content)
         self.memory.mark_mid_term_promoted(memory_id)
         self.memory.save_memory_promotion("mid_term", "long_term", content, reason)

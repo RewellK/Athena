@@ -1,0 +1,63 @@
+{
+  "date": "2026-10-20",
+  "hardware": {
+    "cpu": "Intel i7-9750H",
+    "ram_gib": 16,
+    "inference": "CPU"
+  },
+  "automated": {
+    "tests": 149,
+    "passed": true
+  },
+  "model": "qwen3.5:4b",
+  "fallback": "qwen2.5:3b",
+  "live_acceptance": {
+    "passed": true,
+    "exact_note_and_backup": true,
+    "learned_skill_count": 1,
+    "memory_corrected_and_recalled_after_restart": true,
+    "turn_seconds": [
+      54.37,
+      46.25,
+      65.56,
+      15.52
+    ]
+  },
+  "foreground_presence": {
+    "goal_status": "needs_attention",
+    "note_verified": true,
+    "reminder_seconds": 0.43,
+    "foreground_priority_seconds": 0.683,
+    "settings_isolated": true,
+    "passed": false
+  },
+  "resident": {
+    "seconds": 64.52,
+    "goal_status": "needs_attention",
+    "routine_executed": true,
+    "goal_note_verified": true,
+    "routine_note_verified": true,
+    "foreground_handoff_seconds": 0.171,
+    "handoff_goal_state": "pending",
+    "passed": true
+  },
+  "real_checks": {
+    "gui_opened": true,
+    "browser_navigation_and_click": true,
+    "macos_speech_audio_valid": true,
+    "whisper_synthetic_portuguese_transcription": "approximate",
+    "blocked_request_cancellation": "verified",
+    "launchagent_running": true,
+    "sqlite_backup_quick_check": "ok",
+    "upstream_hashes_match": true
+  },
+  "not_validated": [
+    "real microphone capture",
+    "calendar permission and event creation",
+    "restart of the Mac",
+    "arbitrary tasks and universal goal completion",
+    "LLM weight training",
+    "unrestricted source-code self-modification"
+  ],
+  "interpretation": "The complete foreground acceptance passed. Background effects were verified, but goal completion returned needs_attention; continuity is not proof of semantic completion."
+}

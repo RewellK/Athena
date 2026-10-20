@@ -12,11 +12,14 @@ class ConversationContext:
     phrase into long-term knowledge.
     """
 
-    def __init__(self, max_items=40):
+    def __init__(self, max_items=40, store=None):
         self.max_items = max_items
         self.messages = deque(maxlen=max_items)
         self.entity_mentions = deque(maxlen=max_items)
         self.last_route = None
+        self.store = store
+        if store:
+            self.messages.extend(store.load())
 
     def add_user_message(self, content, route=None):
         self._add("user", content, route)
@@ -27,6 +30,8 @@ class ConversationContext:
             self.last_route = route
 
     def _add(self, speaker, content, route=None):
+        if self.store:
+            self.store.append(speaker, str(content or ""), route or "")
         self.messages.append({
             "speaker": speaker,
             "content": str(content or ""),
@@ -35,6 +40,8 @@ class ConversationContext:
         })
 
     def recent(self, limit=8):
+        if self.store:
+            self.messages=deque(self.store.load(),maxlen=self.max_items)
         return list(self.messages)[-limit:]
 
     def summary(self, limit=8):

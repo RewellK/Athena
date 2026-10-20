@@ -16,3 +16,12 @@ backups/
 tmp/
 temp/
 *.tmp
+
+.athena_workspace/
+venv/
+
+# Local executable artifacts
+.build/
+dist/
+
+.athena-installation.json

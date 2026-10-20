@@ -1,4 +1,5 @@
 import customtkinter as ctk
+import queue
 
 from background_tasks.task_runner import BackgroundTaskRunner
 from brain.orchestrator import Athena
@@ -8,6 +9,8 @@ from gui.memory_panel import MemoryPanel
 from gui.self_status_panel import SelfStatusPanel
 from gui.settings_panel import SettingsPanel
 from gui.world_model_panel import WorldModelPanel
+from gui.presence_panel import PresencePanel, PresenceIndicator
+from gui.learning_panel import LearningPanel
 
 
 class AthenaDesktopApp(ctk.CTk):
@@ -15,27 +18,38 @@ class AthenaDesktopApp(ctk.CTk):
 
     def __init__(self):
         super().__init__()
+        self.ui_callbacks=queue.SimpleQueue()
+        self.after(20,self.drain_ui_callbacks)
         self.title("Athena Desktop")
-        self.geometry("1180x760")
+        self.geometry("1280x850")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
         self.athena = Athena()
-        self.task_runner = BackgroundTaskRunner(self.athena.logger)
+        self.athena.start_foreground_presence()
+        self.task_runner = BackgroundTaskRunner(self.athena.logger,callback_dispatch=self.post_ui)
         self.grid_columnconfigure(0, weight=3)
         self.grid_columnconfigure(1, weight=2)
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self.presence_indicator=PresenceIndicator(self,self.athena)
+        self.presence_indicator.grid(row=0,column=0,columnspan=2,sticky="ew",padx=12,pady=(8,0))
 
         self.chat_panel = ChatPanel(self, self.athena, self.task_runner, self.refresh_lightweight_panels)
-        self.chat_panel.grid(row=0, column=0, sticky="nsew", padx=(12, 6), pady=12)
+        self.chat_panel.grid(row=1, column=0, sticky="nsew", padx=(12, 6), pady=12)
 
         self.side_tabs = ctk.CTkTabview(self)
-        self.side_tabs.grid(row=0, column=1, sticky="nsew", padx=(6, 12), pady=12)
+        self.side_tabs.grid(row=1, column=1, sticky="nsew", padx=(6, 12), pady=12)
 
+        self.presence_tab = self.side_tabs.add("Presença")
+        self.presence_panel=PresencePanel(self.presence_tab,self.athena,self.post_ui)
+        self.presence_panel.pack(fill="both",expand=True,padx=8,pady=8)
+        self.learning_tab=self.side_tabs.add("Aprender")
+        self.learning_panel=LearningPanel(self.learning_tab,self.athena,self.task_runner)
+        self.learning_panel.pack(fill="both",expand=True,padx=8,pady=8)
         self.status_tab = self.side_tabs.add("Status")
         self.memory_tab = self.side_tabs.add("Memória")
         self.world_tab = self.side_tabs.add("Mundo")
-        self.agency_tab = self.side_tabs.add("Agência")
+        self.agency_tab = self.side_tabs.add("Tarefas")
         self.settings_tab = self.side_tabs.add("Config")
 
         self.self_status_panel = SelfStatusPanel(self.status_tab, self.athena, self.task_runner)
@@ -47,7 +61,7 @@ class AthenaDesktopApp(ctk.CTk):
         self.world_model_panel = WorldModelPanel(self.world_tab, self.athena)
         self.world_model_panel.pack(fill="both", expand=True, padx=8, pady=8)
 
-        self.agency_panel = AgencyPanel(self.agency_tab, self.athena)
+        self.agency_panel = AgencyPanel(self.agency_tab, self.athena, self.task_runner)
         self.agency_panel.pack(fill="both", expand=True, padx=8, pady=8)
 
         self.settings_panel = SettingsPanel(self.settings_tab, self.athena, self.refresh_all)
@@ -56,8 +70,25 @@ class AthenaDesktopApp(ctk.CTk):
         self.refresh_all()
         self.after(150, self.show_startup_greeting)
 
+    def post_ui(self,callback):
+        self.ui_callbacks.put(callback)
+
+    def drain_ui_callbacks(self):
+        for _ in range(50):
+            try:callback=self.ui_callbacks.get_nowait()
+            except queue.Empty:break
+            try:callback()
+            except Exception as error:
+                if hasattr(self,'athena'):self.athena.handle_exception(error,{'module':'gui','operation':'ui_callback'})
+        self.after(20,self.drain_ui_callbacks)
+
     def show_startup_greeting(self):
         if not self.athena.settings.get("startupGreetingEnabled", True):
+            return
+        if self.athena.settings.get('agentBackend','legacy')=='openjarvis':
+            self.chat_panel._set_status('Athena pronta. Presença local ativa.')
+            if self.athena.settings.get('startupGreetingSpeak',False):
+                self.athena.voice_engine.speak_startup('Athena pronta.')
             return
         try:
             speak = bool(

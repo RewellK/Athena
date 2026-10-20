@@ -8,6 +8,8 @@ class ToolRegistry:
     """
 
     DEFAULT_TOOLS = [
+        {"id": "local_tasks", "capability": "create local note, schedule reminder in local inbox, SQLite backup, list and cancel local tasks; no arbitrary paths or shell",
+         "confidence": 0.9, "cost": 0.05, "latency": 0.1, "success_rate": 0.8},
         {
             "id": "world_model_core",
             "capability": "represent structured knowledge as entities relationships events states",

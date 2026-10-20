@@ -90,6 +90,39 @@ class LinguisticLearningWorkbench:
             self._save()
         return example.to_dict()
 
+    def resolve_reviewed(self, utterance):
+        """Reuse only explicitly context-free reviewed read operations, without LLM."""
+        import unicodedata
+        def key(text):
+            text = unicodedata.normalize("NFKD", str(text).casefold())
+            return " ".join("".join(c for c in text if not unicodedata.combining(c) and (c.isalnum() or c.isspace())).split())
+        allowed = {"self_identity", "user_identity", "entity_query", "capability_query"}
+        with self._lock:
+            items = [item.to_dict() for item in self._examples
+                     if item.status == "converted_to_pattern" and not item.requires_human_review
+                     and item.context.get("reusable_without_context") is True
+                     and item.expected_intent in allowed and key(item.utterance) == key(utterance)]
+        unique = {(item["expected_intent"], item["expected_target"], item.get("expected_frame", {}).get("target_type", "unknown")) for item in items}
+        if len(unique) != 1:
+            return None
+        intent, target, target_type = unique.pop()
+        return {"intent": intent, "target": target, "target_type": target_type, "confidence": 1.0}
+
+    def interpretation_examples(self, utterance, limit=3):
+        """Retrieve reviewed examples as LLM context, never as automatic authority."""
+        from difflib import SequenceMatcher
+        with self._lock:
+            examples = [item.to_dict() for item in self._examples
+                        if item.status == "converted_to_pattern" and not item.requires_human_review]
+        query = str(utterance).casefold()[:2048]
+        scored = [(SequenceMatcher(None, query, item["utterance"].casefold()[:2048]).ratio(), item)
+                  for item in examples]
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [{"utterance": item["utterance"][:300], "intent": item["expected_intent"],
+                 "target": item["expected_target"][:120], "relation_type": item["expected_relation_type"],
+                 "frame": item.get("expected_frame", {})}
+                for score, item in scored[:limit] if score >= .2]
+
     def examples_by_intent(self, intent):
         with self._lock:
             items = [example for example in self._examples if example.expected_intent == intent]

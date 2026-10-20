@@ -42,6 +42,7 @@ class SelfStatusPanel(ctk.CTkFrame):
     def _render(self, status):
         lines = [
             "STATUS DA ATHENA",
+            f"Execução: {status.get('agent_backend', 'legacy')}",
             "",
             f"LLM: {status['llm']['status']}",
             f"Modelo: {status['llm']['model']}",
@@ -54,10 +55,10 @@ class SelfStatusPanel(ctk.CTkFrame):
             f"Provider de som: {status.get('sound', {}).get('provider', 'desconhecido')}",
             f"Última rota: {status.get('last_response_metadata', {}).get('route', 'nenhuma')}",
             f"Último tempo de resposta: {status.get('last_response_metadata', {}).get('duration_ms', 'n/a')}ms",
-            f"Memórias: {status['memory']['memories']}",
-            f"Memória curta: {status['memory']['short_term']}",
-            f"Memória média: {status['memory']['mid_term']}",
-            f"Memória longa: {status['memory']['long_term']}",
+            f"Memórias anteriores: {status['memory']['memories']}",
+            f"Curta anterior: {status['memory']['short_term']}",
+            f"Média anterior: {status['memory']['mid_term']}",
+            f"Longa anterior: {status['memory']['long_term']}",
             f"Entidades: {status['world']['entities']}",
             f"Relações do mundo: {status['world']['relationships']}",
             f"Eventos do mundo: {status['world']['events']}",

@@ -10,6 +10,8 @@ class ResponsePlanner:
         intent = interpretation.get("intent", "conversation")
         route = self._route_for_intent(intent)
         return {
+            "needs_clarification": interpretation.get("needs_clarification") is True,
+            "clarification_question": interpretation.get("clarification_question", ""),
             "route": route,
             "intent": intent,
             "target": interpretation.get("target", ""),
@@ -31,6 +33,7 @@ class ResponsePlanner:
 
     def _route_for_intent(self, intent):
         route_by_intent = {
+            "skill_request": "agency",
             "self_identity": "identity",
             "creator_query": "identity",
             "user_identity": "question_about_user",

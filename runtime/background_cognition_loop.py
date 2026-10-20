@@ -1,5 +1,6 @@
 import threading
 import time
+import logging
 
 
 class BackgroundCognitionLoop:
@@ -17,9 +18,9 @@ class BackgroundCognitionLoop:
         self._thread.start()
         return True
 
-    def stop(self, timeout=2.0):
+    def stop(self, timeout=None):
         self._stop_event.set()
-        if self._thread and self._thread.is_alive():
+        if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout=timeout)
         return True
 
@@ -32,5 +33,7 @@ class BackgroundCognitionLoop:
         while not self._stop_event.is_set():
             try:
                 self.run_once()
+            except Exception:
+                logging.getLogger(__name__).exception("Ciclo residente falhou; tentando novamente no próximo intervalo")
             finally:
                 self._stop_event.wait(self.interval_seconds)

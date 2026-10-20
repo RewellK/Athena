@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-20",
+  "automated_tests": 165,
+  "automated_passed": true,
+  "frozen_python": "3.12.14",
+  "frozen_core_and_note": true,
+  "frozen_gui_opened": true,
+  "frozen_speaker_model_loaded": true,
+  "speaker_model_dimensions": 512,
+  "frozen_whisper_synthetic_audio": "transcribed locally; approximate Portuguese text",
+  "real_human_microphone_test": false,
+  "speaker_comparison": {
+    "same_repeated_synthetic_audio_similarity": 1.0,
+    "different_synthetic_voice_similarity": 0.15,
+    "human_identification_accuracy_tested": false,
+    "different_phrases_same_synthetic_voice": "initial enrollment rejected as inconsistent; not used as an accuracy claim"
+  },
+  "conversation_learning": {
+    "scenario": "Learn partner name and birthday, correct birthday, restart and ask through relationship",
+    "passed": true,
+    "spontaneous_statements_persisted": true,
+    "corrected_value_recalled_after_restart": true,
+    "final_answer_seconds": 13.3,
+    "correction_seconds": 22.57,
+    "earlier_attempt": "failed under concurrent compilation; this failure led to progressive tool exposure and fewer planning calls"
+  },
+  "ambient_learning": {
+    "named_fact_observed": true,
+    "observed_birthday_recalled_with_uncertainty": true,
+    "seconds": [
+      26.61,
+      23.73
+    ],
+    "automatic_speaker_clarification": "unit tested; the live unknown-speaker statement was ignored rather than attributed"
+  },
+  "self_improvement_scope": "facts and corrections; verified procedure variants; experience backlog and proposals. General code rewrites and external coding-agent delegation are not implemented.",
+  "data": "private Application Support directory; original installation retained",
+  "pending": [
+    "real microphone and human voice enrollment",
+    "reliable full-duplex voice and echo cancellation",
+    "broad task completion reliability",
+    "low-latency local inference",
+    "calendar/work-account integration",
+    "general source-code self-modification"
+  ],
+  "gui_main_thread_callbacks": true,
+  "extended_frozen_gui_test": {
+    "ok": true,
+    "status_callback_delivered": true
+  },
+  "installed_app_opened": true,
+  "native_menu_running": true,
+  "separate_bundle_identities": true,
+  "installation_issue_fixed": "The first launch exposed a background Tk callback crash. GUI callbacks now use a main-thread queue; extended frozen GUI test and installed app startup passed.",
+  "service_installation": "LaunchAgent points to dedicated resident executable; app window and native status menu have distinct bundle identities."
+}

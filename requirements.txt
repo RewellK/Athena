@@ -1,1 +1,3 @@
 customtkinter>=5.2.0
+# Required only by the curated upstream config module on Python 3.10.
+tomli>=2.0; python_version < "3.11"

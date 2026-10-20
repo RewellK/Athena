@@ -48,6 +48,13 @@ class ConversationRouter:
         self.cognitive_control_engine = CognitiveControlEngine(self.identity, settings)
 
     def route(self, user_input, session_context=None, pending_state=None):
+        workbench = self.intent_resolution_engine.workbench
+        learned = workbench.resolve_reviewed(user_input) if workbench and not (pending_state or {}).get("pending_type") else None
+        if learned:
+            plan = self.response_planner.plan(self.intent_resolution_engine._normalize(learned))
+            plan.update(source="local_reviewed_example", needs_clarification=False, intent_llm_calls=0,
+                        relevance_llm_calls=0, intent_interpretation_ms=0)
+            return plan
         fast_route = self._fast_route(user_input, pending_state=pending_state, session_context=session_context)
         if fast_route:
             return fast_route
@@ -65,11 +72,14 @@ class ConversationRouter:
             unavailable["intent_llm_calls"] = intent_llm_calls
             return unavailable
 
-        if resolution.get("intent") == "unknown" or self._confidence(resolution.get("confidence"), 0.0) < 0.35:
-            fallback = self._cognitive_fallback_route(user_input, pending_state, session_context=session_context, source_suffix="+llm_low_confidence_fallback")
-            if fallback:
-                fallback["intent_llm_calls"] = intent_llm_calls
-                return fallback
+        if not resolution.get("needs_clarification") and (resolution.get("intent") == "unknown" or self._confidence(resolution.get("confidence"), 0.0) < 0.35):
+            if self.settings and self.settings.get("conversationRoutingMode", "legacy") == "llm_first":
+                resolution["needs_clarification"] = True
+            else:
+                fallback = self._cognitive_fallback_route(user_input, pending_state, session_context=session_context, source_suffix="+llm_low_confidence_fallback")
+                if fallback:
+                    fallback["intent_llm_calls"] = intent_llm_calls
+                    return fallback
 
         interpretation = dict(resolution)
         interpretation.update({
@@ -77,7 +87,8 @@ class ConversationRouter:
             "target_type": target.get("target_type"),
         })
         plan = self.response_planner.plan(interpretation)
-        plan = self._apply_query_precedence(user_input, plan)
+        if not self.settings or self.settings.get("conversationRoutingMode", "legacy") != "llm_first":
+            plan = self._apply_query_precedence(user_input, plan)
         relevance_calls_before = self._llm_call_count()
         relevance = self._evaluate_relevance(user_input, plan, target, session_context)
         relevance_llm_calls = max(0, self._llm_call_count() - relevance_calls_before)
@@ -94,7 +105,8 @@ class ConversationRouter:
             "target_type": plan.get("target_type", target.get("target_type", "unknown")),
             "summary": plan.get("summary", route),
             "confidence": self._confidence(plan.get("confidence"), 0.0),
-            "needs_clarification": self._confidence(plan.get("confidence"), 0.0) < 0.45,
+            "needs_clarification": bool(plan.get("needs_clarification")) or self._confidence(plan.get("confidence"), 0.0) < 0.45,
+            "clarification_question": plan.get("clarification_question", ""),
             "requires_memory": bool(plan.get("requires_memory", False)),
             "requires_tool": bool(plan.get("requires_tool", False)),
             "tool_name": plan.get("tool_name"),
@@ -120,6 +132,8 @@ class ConversationRouter:
             return None
         if not self.settings.get("useFastConversationPath", True):
             return None
+        if self.settings.get("conversationRoutingMode", "legacy") == "llm_first":
+            return self.cognitive_control_engine.classify_controls(user_input, pending_state=pending_state, session_context=session_context)
         return self.cognitive_control_engine.classify(user_input, pending_state=pending_state, session_context=session_context)
 
     def _cognitive_fallback_route(self, user_input, pending_state=None, session_context=None, source_suffix=""):
@@ -205,6 +219,8 @@ class ConversationRouter:
         return max(0.0, min(1.0, number))
 
     def _evaluate_relevance(self, user_input, plan, target, session_context):
+        if self.settings and self.settings.get("conversationRoutingMode", "legacy") == "llm_first":
+            return {}
         route = plan.get("route")
         if route in {
             "external_information",

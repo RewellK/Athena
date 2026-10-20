@@ -1,8 +1,10 @@
 import json
+from contextlib import nullcontext
 import time
 from datetime import datetime
 
 from agency.action_engine import ActionEngine
+from agency.local_tasks import LocalTasks
 from audio.message_sound import MessageSoundEngine
 from agency.agency_engine import AgencyEngine
 from agency.goal_engine import GoalEngine
@@ -11,6 +13,7 @@ from agency.proactivity_engine import ProactivityEngine
 from agency.tool_registry import ToolRegistry
 from background_tasks.task_runner import BackgroundTaskRunner
 from capabilities.self_expansion_planner import SelfExpansionPlanner
+from capabilities.skill_backend import SkillBackend
 from bootstrap import AthenaBootstrap
 from commands import CommandPaletteEngine, CommandSessionStore
 from core.context_builder import ContextBuilder
@@ -18,6 +21,7 @@ from core.logger import AthenaLogger
 from core.settings import Settings
 from conversation.capability_engine import CapabilityEngine
 from conversation.conversation_context import ConversationContext
+from conversation.recent_store import RecentConversationStore
 from conversation.conversation_engine import ConversationEngine
 from conversation.conversation_router import ConversationRouter
 from conversation.conversation_metrics import ConversationMetrics
@@ -90,6 +94,9 @@ class Athena:
 
         self.creator_name = self.identity["creator"]
         self.settings = Settings()
+        if getattr(__import__("sys"),"frozen",False):
+            from desktop.paths import resources
+            self.settings.values["projectRoot"]=str(resources())
         self.context_builder = ContextBuilder(self.memory, self.identity)
         self.llm_provider = OllamaProvider(self.settings, self.logger)
         self.git_awareness_engine = GitAwarenessEngine(
@@ -107,7 +114,7 @@ class Athena:
 
         self.intention_engine = IntentionEngine(self.llm_provider, self.context_builder, self.logger)
         self.memory_interpreter = MemoryInterpreter(self.llm_provider, self.context_builder, self.logger)
-        self.memory_manager = MemoryManager(self.memory, self.memory_interpreter, self.creator_name)
+        self.memory_manager = MemoryManager(self.memory, self.memory_interpreter, self.creator_name, settings=self.settings)
         self.relevance_engine = RelevanceEngine(self.llm_provider, self.identity, self.logger, self.settings)
         self.follow_up_question_engine = FollowUpQuestionEngine(self.llm_provider, self.identity, self.logger, self.settings)
         self.consolidation_planner = ConsolidationPlanner()
@@ -201,7 +208,9 @@ class Athena:
             git_awareness_engine=self.git_awareness_engine,
             error_capture=self.error_capture,
         )
-        self.conversation_context = ConversationContext()
+        self.conversation_context = ConversationContext(store=RecentConversationStore(
+            "knowledge.db", ttl_hours=self.settings.get("shortTermMemoryHours", 24)
+        ) if self.settings.get("persistRecentConversation", True) else None)
         self.conversation_router = ConversationRouter(
             self.llm_provider,
             self.context_builder,
@@ -211,6 +220,7 @@ class Athena:
             tool_registry=self.tool_registry,
             relevance_engine=self.relevance_engine,
         )
+        self.conversation_router.intent_resolution_engine.workbench = self.linguistic_learning_workbench
         self.conversation_engine = ConversationEngine(
             identity=self.identity,
             llm_provider=self.llm_provider,
@@ -290,6 +300,12 @@ class Athena:
             learning_harvest_worker=self.learning_harvest_worker,
             daily_briefing_planner=self.daily_briefing_planner,
         )
+        self.local_tasks = LocalTasks(notifications=self.settings.get("localDesktopNotifications", True))
+        self.skill_backend = SkillBackend(self.local_tasks, self.llm_provider)
+        self.runtime_supervisor.scheduler.register("memory_maintenance", self.memory_manager.maintenance, min_interval_seconds=300)
+        self.conversation_router.intent_resolution_engine.skill_backend = self.skill_backend
+        self.runtime_supervisor.scheduler.register("local_tasks", lambda: self.local_tasks.run_once()
+            if self.settings.get("localAutonomyEnabled", False) else {"status": "disabled"}, min_interval_seconds=1)
         self.daily_briefing_planner.runtime_supervisor = self.runtime_supervisor
         self.cognitive_status_engine = CognitiveStatusEngine(
             runtime_supervisor=self.runtime_supervisor,
@@ -322,9 +338,59 @@ class Athena:
         self.pending_history = []
         self.last_unknown_interaction = None
 
+    def agent_maintenance(self):
+        state=self.runtime_supervisor.get_status()
+        if state.get('paused') or state.get('safe_mode'):
+            return {'status':'paused' if state.get('paused') else 'safe_mode'}
+        from integrations.openjarvis.adapter import OpenJarvisRuntime
+        if not hasattr(self, 'agent_runtime'):
+            self.agent_runtime = OpenJarvisRuntime(self)
+        routines = self.agent_runtime.catalog.routines.tick()
+        goals = self.agent_runtime.catalog.goals.tick(self)
+        return {'routines':routines,'goals':goals}
+
+    def start_foreground_presence(self):
+        if self.settings.get('agentBackend','legacy')!='openjarvis':
+            return
+        if not hasattr(self,'foreground_presence'):
+            from runtime.foreground_presence import ForegroundPresence
+            self.foreground_presence=ForegroundPresence(self)
+        self.foreground_presence.start()
+
+    def cancel_current_turn(self, reason='user'):
+        runtime = getattr(self, 'agent_runtime', None)
+        if runtime:
+            runtime.cancel(reason)
+        presence=getattr(self,'foreground_presence',None)
+        if presence:
+            presence.cancel_background(reason)
+        self.llm_provider.cancel_current()
+        self.voice_engine.stop()
+
     def chat(self, user_input):
+        presence=getattr(self,'foreground_presence',None)
+        with presence.interaction() if presence else nullcontext():
+            return self._chat_entry(user_input)
+
+    def _chat_entry(self, user_input):
         try:
-            return self._chat_impl(user_input)
+            budget = getattr(self.llm_provider, "turn_budget", None)
+            with budget() if budget else nullcontext():
+                if self.settings.get("agentBackend", "legacy") == "openjarvis" and not str(user_input).startswith("/"):
+                    from integrations.openjarvis.adapter import OpenJarvisRuntime
+                    snapshot=tuple(self.settings.get(k,False) for k in ('agentPlanningMode','agentToolSelection','agentToolMode','computerToolsEnabled','browserToolsEnabled','allowExternalRequests'))
+                    if hasattr(self, 'agent_runtime') and self.agent_runtime.capability_snapshot != snapshot:
+                        self.agent_runtime.close()
+                        del self.agent_runtime
+                    if not hasattr(self, "agent_runtime"):
+                        self.agent_runtime = OpenJarvisRuntime(self)
+                    return self.agent_runtime.chat(user_input)
+                if self.settings.get("toolAgentEnabled", False) and not str(user_input).startswith("/"):
+                    from agency.tool_agent import ToolAgent
+                    if not hasattr(self, "tool_agent"):
+                        self.tool_agent = ToolAgent(self)
+                    return self.tool_agent.chat(user_input)
+                return self._chat_impl(user_input)
         except Exception as error:
             return self.handle_exception(error, {"module": "brain/orchestrator.py", "operation": "chat"})
 
@@ -535,6 +601,7 @@ class Athena:
             "requires_action": route == "agency",
             "requires_approval": True,
             "needs_clarification": bool(route_result.get("needs_clarification", False)),
+            "clarification_question": route_result.get("clarification_question", ""),
             "confidence": route_result.get("confidence", 0.0),
             "rationale": f"Conversation Router classified the message as {route}.",
             "approval_target": "",
@@ -553,6 +620,8 @@ class Athena:
         }
 
     def _delegate_conversation_route(self, intention_id, intention, user_input, metadata=None):
+        if intention.get("needs_clarification") and (intention.get("clarification_question") or (self.settings.get("conversationRoutingMode", "legacy") == "llm_first" and intention.get("route") in {"learning", "agency"})):
+            return intention.get("clarification_question") or "Pode esclarecer a quem você se refere e o que quer que eu faça?"
         metadata = metadata if isinstance(metadata, dict) else {}
         route = intention.get("route")
 
@@ -1793,6 +1862,58 @@ Resultado estruturado do Core:
         return self.knowledge_ingestion_engine.sources_summary()
 
     def _handle_agency_route(self, intention_id, intention):
+        request = self._structured_request(intention)
+        if intention.get("intent") == "skill_request" and request.get("operation") not in {"local_task", "local_tasks_list", "local_task_cancel", "local_skill_run"} and getattr(self, "skill_backend", None):
+            result = self.skill_backend.learn(intention.get("raw_user_input", ""),
+                allow_local_policy=self.settings.get("autonomousLocalSkillLearning", False) and self.settings.get("localAutonomyEnabled", False))
+            if result.get("status") == "active":
+                return f"Aprendi, testei e ativei a habilidade local {result['skill']['name']}. ID: {result['skill']['id']}. Ela usa apenas as ferramentas locais já permitidas."
+            if result.get("status") == "awaiting_review":
+                skill = result["skill"]
+                return f"Projetei e testei uma habilidade local: {skill['name']}. Está candidata para revisão. ID: {skill['id']}; hash: {skill['digest']}. Use a interface de habilidades para revisar e ativar."
+            return f"Ainda não criei uma habilidade executável: {result.get('reason', result.get('status'))}"
+        if request.get("operation") == "local_skill_run" and getattr(self, "skill_backend", None):
+            if not self.settings.get("localAutonomyEnabled", False):
+                return "A execução local está desativada nas configurações."
+            try:
+                result = self.skill_backend.run(str(request.get("skill_id") or ""))
+                completed = sum(item["status"] == "completed" for item in result["tasks"])
+                return f"Habilidade executada: {completed}/{len(result['scheduled'])} tarefas concluídas e registradas."
+            except ValueError as error:
+                return f"Não executei a habilidade: {error}"
+        if request.get("operation") == "local_tasks_list" and getattr(self, "local_tasks", None):
+            items = self.local_tasks.list()
+            return "\n".join(f"{item['id']}: {item['kind']} — {item['status']} — {item['result'] or ''}" for item in items) or "Não há tarefas locais."
+        if request.get("operation") == "local_task_cancel" and getattr(self, "local_tasks", None):
+            cancelled = self.local_tasks.cancel(str(request.get("task_id") or ""))
+            return "Tarefa cancelada." if cancelled else "Não encontrei uma tarefa pendente com esse identificador."
+        if request.get("operation") == "local_task" and getattr(self, "local_tasks", None):
+            if not self.settings.get("localAutonomyEnabled", False):
+                return "A execução local está desativada nas configurações."
+            kind = request.get("kind")
+            text = request.get("text", "")
+            due = request.get("due")
+            if kind == "reminder" and not due:
+                return "Quando você quer receber esse lembrete? Informe data e horário."
+            try:
+                if due:
+                    parsed = datetime.fromisoformat(str(due))
+                    if parsed.tzinfo is None:
+                        return "Qual é o fuso horário desse agendamento?"
+                    due = parsed.timestamp()
+                task_id = self.local_tasks.schedule(kind, text, due)
+                if due is None or due <= time.time():
+                    self.local_tasks.run_once()
+                task = next(item for item in self.local_tasks.list() if item["id"] == task_id)
+                if task["status"] == "completed":
+                    output = json.loads(task["result"])
+                    return f"Concluído e verificado: {output['path']}"
+                if task["status"] == "failed":
+                    return f"A tarefa falhou: {task['result']}"
+                return f"Tarefa agendada ({task_id}). O residente executará no horário; o lembrete aparecerá na caixa local."
+            except (ValueError, TypeError) as error:
+                return f"Preciso ajustar os dados da tarefa: {error}"
+
         proposal = self.agency_engine.consider(intention_id, intention)
         if not proposal:
             proactive = self.proactivity_engine.propose()
@@ -1917,7 +2038,7 @@ Resultado estruturado do Core:
                 self._set_pending_status(self.pending_plan, "approved")
                 self.pending_plan = None
                 executed = self.agency_engine.approve_plan(plan_id)
-                return "Plano aprovado. Registrei o resultado controlado das ações:\n" + "\n".join(f"- {item}" for item in executed)
+                return "Plano aprovado e registrado. Essas ações ainda não têm executor externo; não foram executadas:\n" + "\n".join(f"- {item}" for item in executed)
             if intention_type == "rejection":
                 plan_id = self.pending_plan["plan_id"]
                 self._set_pending_status(self.pending_plan, "rejected")
@@ -2222,6 +2343,7 @@ Mensagem do usuário:
                 return fallback
 
         return {
+            "agent_backend": self.settings.get("agentBackend", "legacy"),
             "llm": {
                 "status": llm_health.get("status"),
                 "model": self.settings.get("ollamaModel"),
