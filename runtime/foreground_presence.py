@@ -48,6 +48,13 @@ class ForegroundPresence:
         self.view.agent_runtime=OpenJarvisRuntime(self.view)
         self.view.chat=self.chat_background
         self.worker=self.goal_worker=self.guard=None
+        from voice.ambient import AmbientListener
+        self.ambient=AmbientListener(core,self)
+        from desktop.status import StatusBroker
+        self.status_broker=StatusBroker(core)
+        from learning.experience_workshop import ExperienceWorkshop
+        self.workshop=ExperienceWorkshop(core)
+        self.last_review=0
 
     def chat_background(self,text):
         with self.view.llm_provider.turn_budget():
@@ -56,6 +63,7 @@ class ForegroundPresence:
     def cancel_background(self,reason='user'):
         self.view.agent_runtime.cancel(reason)
         self.view.llm_provider.cancel_current()
+        if hasattr(self,'ambient'):self.ambient.cancel()
 
     @contextmanager
     def interaction(self):
@@ -80,6 +88,8 @@ class ForegroundPresence:
         self.goal_worker=threading.Thread(target=self.goal_loop,daemon=True,name='athena-queued-goals')
         self.guard=threading.Thread(target=self.watch_priority,daemon=True,name='athena-user-priority')
         self.worker.start();self.goal_worker.start();self.guard.start()
+        self.ambient.start()
+        self.status_broker.start()
 
     def watch_priority(self):
         while not self.stop_event.wait(.1):
@@ -90,10 +100,13 @@ class ForegroundPresence:
         self.tick_goals()
 
     def tick_local(self):
+        if hasattr(self.core,"foreground_presence"):self.status_broker.tick()
         state=self.core.runtime_supervisor.get_status()
         if state.get('paused') or state.get('safe_mode'):return
         self.core.runtime_supervisor.heartbeat()
         if not self.core.settings.get('localAutonomyEnabled',True):return
+        if __import__('time').monotonic()-self.last_review>300:
+            self.workshop.tick();self.last_review=__import__('time').monotonic()
         self.core.local_tasks.run_once()
         self.core.agent_runtime.catalog.routines.tick()
 
@@ -101,7 +114,7 @@ class ForegroundPresence:
         state=self.core.runtime_supervisor.get_status()
         if state.get('paused') or state.get('safe_mode'):return
         enabled=self.core.settings.get('queuedGoalModelEnabled',self.core.settings.get('useLLM',True))
-        if self.interacting.is_set() or self.stop_event.is_set() or not enabled:return
+        if self.interacting.is_set() or self.stop_event.is_set() or self.ambient.busy.is_set() or not enabled:return
         self.view.settings.refresh()
         self.idle.clear()
         try:
@@ -126,6 +139,7 @@ class ForegroundPresence:
 
     def stop(self):
         self.stop_event.set();self.cancel_background('shutdown')
+        self.ambient.stop()
         for thread in (self.worker,self.goal_worker,self.guard):
             if thread and thread is not threading.current_thread():thread.join()
         self.view.agent_runtime.close()

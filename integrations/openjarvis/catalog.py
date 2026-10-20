@@ -36,7 +36,7 @@ class Catalog:
         self.definitions = {}
         self.add('create_note','Criar e verificar nota local.', {'text':S}, ('text',),'file:write',lambda a:self.task('note',a),True)
         self.add('backup_memory','Criar e verificar backup SQLite.',{},(),'file:write',lambda a:self.task('backup',a),True)
-        self.add('remember','Guardar ou corrigir fato explícito: subject pessoa, attribute propriedade estável, fact valor.',{'subject':S,'attribute':S,'fact':S},('subject','attribute','fact'),'memory:write',lambda a:self.memory.remember(**a),True)
+        self.add('remember','Guardar ou corrigir fato explícito: subject pessoa, attribute propriedade estável, fact valor.',{'subject':S,'attribute':S,'fact':S},('subject','attribute','fact'),'memory:write',lambda a:self.memory.remember(**a,source='conversation_statement'),True)
         self.add('recall','Buscar fatos persistentes e identidade do usuário.',{'subject':S},('subject',),'memory:read',lambda a:self.memory.search(a['subject']))
         self.add('memory_history','Consultar versões e correções de um fato.',{'subject':S},('subject',),'memory:read',lambda a:self.memory.history(a['subject']))
         self.add('schedule_reminder','Agendar lembrete. when deve ser ISO com fuso. Pergunte se faltar horário.',{'text':S,'when':S},('text','when'),'schedule:create',lambda a:self.task('reminder',a),True)
@@ -86,6 +86,9 @@ class Catalog:
         leaf_names={'create_note','backup_memory','remember','recall','memory_history','schedule_reminder','list_tasks','cancel_task','queue_goal','list_goals','schedule_routine','list_routines','cancel_goal','cancel_routine'}
         self.add('self_status','Consultar identidade, ferramentas reais, estado operacional e limites da própria Athena.',{},(),'memory:read',lambda a:self.self_status())
         leaf_names.add('self_status')
+        self.add('discover_tools','Abrir ferramentas: files (arquivos), browser (web), computer (apps/calendário), skills (habilidades), tasks (agenda/fila), learning (experiências).',{'group':{'type':'string','enum':['files','browser','computer','skills','tasks','learning']}},('group',),'memory:read',self.discover_tools)
+        self.add('learning_review','Revisar experiências ou aprovar melhoria proposta. operation=report|approve|export; approve/export exige proposal_id.',{'operation':{'type':'string','enum':['report','approve','export']},'proposal_id':S},('operation',),'memory:write',self.learning_review,True)
+        leaf_names.update({'discover_tools','learning_review'})
         self.public_names={'memory','tasks','files','skills'}|leaf_names
         self.discovery_names={'files','skills'}|leaf_names
         if core.settings.get('computerToolsEnabled',False) and sys.platform=='darwin':
@@ -108,6 +111,22 @@ class Catalog:
 
     def add(self, name, description, properties, required, capability, handler, mutates=False):
         self.definitions[name] = Definition(name, description, properties, required, capability, handler, mutates)
+
+    def discover_tools(self,args):
+        groups={'files':{'files'},'browser':{'browser','read_web','web_search'},
+                'computer':{'computer','calendar','open_app','open_browser'},
+                'skills':{'skills','evolve_skill'},'learning':{'learning_review','learning_status','execution_history','self_status'},
+                'tasks':{'schedule_reminder','list_tasks','cancel_task','queue_goal','list_goals','cancel_goal','schedule_routine','list_routines','cancel_routine'}}
+        names=groups[args['group']]&set(self.definitions)
+        self.runtime.engine.visible_tools.update(names)
+        return {'opened_tools':sorted(names),'available':bool(names)}
+
+    def learning_review(self,args):
+        from learning.experience_workshop import ExperienceWorkshop
+        workshop=ExperienceWorkshop(self.core)
+        if args['operation']=='report':return workshop.collect()
+        if not args.get('proposal_id'):raise ValueError('Selecione a proposta concreta pelo ID antes de aprovar.')
+        return workshop.approve(args['proposal_id']) if args['operation']=='approve' else workshop.export(args['proposal_id'])
 
     def validate(self, name, arguments):
         definition = self.definitions.get(name)

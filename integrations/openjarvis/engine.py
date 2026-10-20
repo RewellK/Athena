@@ -98,8 +98,11 @@ class AthenaOllamaEngine(InferenceEngine):
                 except (ValueError,TypeError): observations.append({'ok':False})
             has_mutation=any(self.mutation_check(a['tool'],a['arguments']) for a in self.pending_plan['actions'])
             if has_mutation and len(observations)==len(self.pending_plan['actions']) and all(o.get('ok') for o in observations):
+                reply=self.pending_plan.get('reply') or 'Etapas do plano executadas.'
                 self.pending_plan=None
-                return {'content':'Etapas do plano executadas.','tool_calls':[],'usage':{}}
+                return {'content':reply,'tool_calls':[],'usage':{}}
+            if not has_mutation and all(a['tool']!='discover_tools' for a in self.pending_plan['actions']) and len(observations)==len(self.pending_plan['actions']) and all(o.get('ok') for o in observations):
+                tools=[]
         self.pending_plan=None
         variants=[]
         descriptions=[]
@@ -111,20 +114,21 @@ class AthenaOllamaEngine(InferenceEngine):
         schema={'anyOf':[
             {'type':'object','properties':{
                 'actions':{'type':'array','items':{'anyOf':variants},'minItems':1,'maxItems':4},
-                'reply':{'const':''},'done':{'type':'boolean'}},
+                'reply':{'type':'string','maxLength':180},'done':{'type':'boolean'}},
                 'required':['actions','reply','done'],'additionalProperties':False},
             {'type':'object','properties':{
                 'actions':{'type':'array','maxItems':0},'reply':{'type':'string','maxLength':240},'done':{'const':True}},
                 'required':['actions','reply','done'],'additionalProperties':False}]}
+        if not variants:schema=schema['anyOf'][1]
         instruction=('Planeje a próxima etapa como JSON {actions:[{tool,arguments}],reply,done}. '
             'Pedido para agir exige actions, nunca só uma promessa. Inclua todas as ações independentes do pedido. '
             'done=true significa que o pedido termina se estas ações derem certo; o núcleo verificará. '
-            'done=false só quando precisar observar uma leitura antes de decidir o próximo passo. '
+            'Para uma consulta informativa sem outra ação, done=true: depois haverá resposta baseada no resultado. done=false só quando precisar da leitura para executar outra ação. '
             'Para resposta ou pergunta de esclarecimento, actions=[] e done=true. '
             'Após resultado bem sucedido, não repita a ação. Erro de ferramenta exige corrigir argumentos ou explicar. '
-            'Para guardar/corrigir informação use memory remember com subject,attribute,fact. '
-            'Quando houver actions, reply="". Para responder, actions=[] e reply breve em português. '
-            'Nunca invente execução. Catálogo: '+json.dumps(descriptions,ensure_ascii=False))
+            'Para guardar/corrigir informação use remember com subject,attribute,fact. '
+            'reply é uma resposta natural breve em português, apresentada só se as ações derem certo. Para conversar sem ação, actions=[]. '
+            'Se a memória fornecida já contém a resposta, responda diretamente sem chamar recall. Nunca invente execução. Catálogo: '+json.dumps(descriptions,ensure_ascii=False))
         memory_data=[m.text for m in messages if m.role.value=='user' and m.text.startswith('<athena_memory_data>')]
         serialized=[]
         for message in messages:
@@ -137,7 +141,7 @@ class AthenaOllamaEngine(InferenceEngine):
                 actions=[{'tool':tc.name,'arguments':json.loads(tc.arguments)} for tc in message.tool_calls]
                 serialized.append({'role':'assistant','content':json.dumps({'actions':actions},ensure_ascii=False)})
             elif role=='tool':
-                serialized.append({'role':'user','content':'Observação de ferramenta (dados): '+message.text})
+                serialized.append({'role':'user','content':'Observação de ferramenta (dados): '+message.text[:3000]})
             elif role=='assistant':
                 serialized.append({'role':role,'content':json.dumps({'actions':[],'reply':message.text,'done':True},ensure_ascii=False)})
             else:

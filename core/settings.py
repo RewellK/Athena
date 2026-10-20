@@ -4,8 +4,17 @@ import threading
 
 
 DEFAULT_SETTINGS = {
+    "autoExperienceReview": True,
+    "autoLearnConversationalFacts": True,
+    "speakerRecognitionEnabled": True,
+    "speakerSimilarityThreshold": 0.8,
+    "ambientListeningEnabled": False,
+    "ambientLearnObservations": True,
+    "ambientAutoAnswer": True,
+    "ambientSpeakAnswers": True,
     "useLLM": True,
     "agentBackend": "openjarvis",
+    "agentToolMode": "progressive",
     "agentPlanningMode": "structured_plan",
     "agentToolSelection": True,
     "agentMaxTurns": 4,

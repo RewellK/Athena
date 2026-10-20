@@ -19,3 +19,9 @@ temp/
 
 .athena_workspace/
 venv/
+
+# Local executable artifacts
+.build/
+dist/
+
+.athena-installation.json

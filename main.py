@@ -31,7 +31,8 @@ def _main():
 
 
 def main():
-    os.chdir(Path(__file__).resolve().parent)
+    from desktop.paths import prepare_home
+    os.chdir(prepare_home())
     os.umask(0o077)
     with foreground_session():
         _main()

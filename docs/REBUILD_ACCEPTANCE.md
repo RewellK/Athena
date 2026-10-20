@@ -45,3 +45,15 @@ Resultados de modelos e limitações estão em `LOCAL_MODELS.md`.
 
 [Referência Muse e diferenças](MUSE_REFERENCE.md). O serviço estar ativo não
 significa que toda tarefa em linguagem livre será resolvida corretamente.
+
+## Aplicativo e aprendizagem conversacional
+
+A rodada do aplicativo passou 165 testes. Aprendizado espontâneo de relação e
+data, correção da mesma propriedade e resposta após reinício foram exercitados
+com a LLM real. A busca de fatos antigos foi ampliada com FTS5. O aplicativo
+empacotado abriu, executou ferramenta, carregou o modelo de falantes e transcreveu
+áudio sintético. O teste prolongado confirmou callbacks da GUI na thread principal.
+
+O modo ambiente e a comparação de falantes continuam experimentais: não houve
+avaliação com o microfone real ou vozes humanas cadastradas. Veja
+[relatório do aplicativo](APP_VALIDATION.json) e [uso no Mac](MAC_APP.md).

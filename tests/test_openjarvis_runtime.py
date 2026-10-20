@@ -296,5 +296,35 @@ class RuntimeTests(unittest.TestCase):
         for path,digest in manifest['files_sha256'].items():
             self.assertEqual(hashlib.sha256((root/'openjarvis'/path).read_bytes()).hexdigest(),digest,path)
 
+    def test_progressive_common_task_uses_one_call_and_natural_verified_reply(self):
+        self.core.settings.update(agentToolMode='progressive',agentPlanningMode='structured_plan')
+        plan={'actions':[{'tool':'create_note','arguments':{'text':'Plano curto'}}],'reply':'Deixei a nota pronta.','done':True}
+        runtime=self.runtime([LLMResult(True,json.dumps(plan))])
+        result=runtime.chat('Crie uma nota: Plano curto')
+        self.assertEqual(runtime.engine.calls,1)
+        self.assertIn('Deixei a nota pronta.',result)
+        self.assertTrue(runtime.events[0]['ok'])
+
+    def test_progressive_discovery_opens_file_tools_before_execution(self):
+        self.core.settings.update(agentToolMode='progressive',agentPlanningMode='structured_plan')
+        discover={'actions':[{'tool':'discover_tools','arguments':{'group':'files'}}],'reply':'','done':True}
+        write={'actions':[{'tool':'files','arguments':{'operation':'write','path':'plano.txt','content':'Plano'}}],'reply':'Arquivo criado.','done':True}
+        runtime=self.runtime([LLMResult(True,json.dumps(discover)),LLMResult(True,json.dumps(write))])
+        runtime.chat('Crie um arquivo plano.txt contendo Plano')
+        self.assertEqual(runtime.engine.calls,2)
+        self.assertEqual([e['tool'] for e in runtime.events],['discover_tools','files'])
+        self.assertTrue(all(e['ok'] for e in runtime.events))
+
+    def test_memory_finds_older_facts_and_removes_superseded_search_entries(self):
+        runtime=self.runtime([])
+        runtime.catalog.memory.remember('Projeto antigo','Orion','código')
+        with self.core.local_tasks.connect() as db:
+            db.executemany('INSERT INTO personal_facts(subject,subject_key,fact,source,active,created,attribute) VALUES (?,?,?,?,1,?,?)',
+                [('Pessoa '+str(i),'pessoa '+str(i),'Informação sem relação','test',2000000000+i,'teste') for i in range(2200)])
+        result=runtime.catalog.memory.search('Orion')['facts']
+        self.assertEqual(result[0]['subject'],'Projeto antigo')
+        runtime.catalog.memory.remember('Projeto antigo','Nova referência','código')
+        self.assertEqual(runtime.catalog.memory.search('Orion')['facts'],[])
+
 
 if __name__=='__main__': unittest.main()

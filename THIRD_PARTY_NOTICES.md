@@ -15,3 +15,15 @@ its optional providers, servers, frontend, tools, Rust binary or training suite.
 Athena adapters, policy, memory, workspace, procedures, voice and resident code
 are maintained separately under `integrations/openjarvis`, `voice`, and `runtime`.
 No model weights or training datasets are distributed in the source archive.
+
+## Local speaker identification
+
+Sherpa-ONNX 1.13.8 provides the CPU extractor; the public 3D-Speaker CAMPPlus
+ONNX export is obtained from the upstream speaker-recognition release:
+https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models
+
+Model: `3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx` (29,596,978 bytes).
+SHA-256: `357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b`.
+3D-Speaker project: https://github.com/modelscope/3D-Speaker (Apache-2.0 code).
+The upstream release notes that model-specific licensing applies. No voice
+profiles or personal recordings are distributed with the application or source.

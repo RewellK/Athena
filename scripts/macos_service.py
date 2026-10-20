@@ -6,13 +6,21 @@ import plistlib
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+SOURCE = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(SOURCE))
+from desktop.paths import data_home
+ROOT = data_home()
 LABEL = "local.athena.resident"
 
 
 def specification(python=None):
+    pointer=SOURCE/'.athena-installation.json'
+    if pointer.exists() and python is None:
+        import json
+        from desktop.service import specification as bundled
+        return bundled(home=ROOT)
     return {"Label": LABEL, "ProgramArguments": [str(Path(python or sys.executable).absolute()),
-            str(ROOT / "resident.py")], "WorkingDirectory": str(ROOT),
+            str(SOURCE / "resident.py")], "WorkingDirectory": str(ROOT),
         "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}, "ThrottleInterval": 30,
         "ProcessType": "Background", "Umask": 0o077,
         "StandardOutPath": str(ROOT / "logs/resident.stdout.log"),

@@ -6,6 +6,7 @@ class ChatPanel(ctk.CTkFrame):
 
     def __init__(self, master, athena, task_runner=None, on_message_processed=None):
         super().__init__(master)
+        self.dispatch=master.post_ui
         self.athena = athena
         self.task_runner = task_runner
         self.on_message_processed = on_message_processed
@@ -50,9 +51,11 @@ class ChatPanel(ctk.CTkFrame):
             from voice.local_input import LocalVoiceInput
             if not hasattr(self, 'voice_input'):
                 self.voice_input = LocalVoiceInput(self.athena.settings)
-            transcript = self.voice_input.record()['text']
-            self.after(0, lambda: self._append('Você (voz)', transcript))
-            self.after(0, lambda: self._set_status('Athena está processando...'))
+            self.athena.voice_engine.stop()
+            with self.athena.foreground_presence.interaction():
+                transcript = self.voice_input.record()['text']
+            self.dispatch(lambda: self._append('Você (voz)', transcript))
+            self.dispatch(lambda: self._set_status('Athena está processando...'))
             if self.athena.settings.get('voiceAutoSend',False):
                 return self.athena.chat(transcript)
             return {'transcript':transcript}
@@ -62,12 +65,12 @@ class ChatPanel(ctk.CTkFrame):
                     self._set_processing(False)
                     self.entry.delete(0,'end');self.entry.insert(0,response['transcript'])
                     self._set_status('Confira a transcrição e envie quando estiver correta.')
-                self.after(0,preview)
+                self.dispatch(preview)
             else:
-                self.after(0, lambda: self._finish_response(response))
+                self.dispatch(lambda: self._finish_response(response))
         def failure(error, _stacktrace):
             message = 'Entrada de voz indisponível: '+str(error)
-            self.after(0, lambda: self._finish_response(message))
+            self.dispatch(lambda: self._finish_response(message))
         self.task_runner.submit(work, on_success=success, on_error=failure, description='local_voice_turn')
 
     def _send_event(self, _event):
@@ -91,11 +94,11 @@ class ChatPanel(ctk.CTkFrame):
             return self.athena.chat(message)
 
         def success(response):
-            self.after(0, lambda: self._finish_response(response))
+            self.dispatch(lambda: self._finish_response(response))
 
         def failure(error, _stacktrace):
             friendly = self.athena.handle_exception(error, {"module": "gui/chat_panel.py", "operation": "send_message"})
-            self.after(0, lambda: self._finish_response(friendly))
+            self.dispatch(lambda: self._finish_response(friendly))
 
         if self.task_runner:
             self.task_runner.submit(work, on_success=success, on_error=failure, description="gui_chat_message")

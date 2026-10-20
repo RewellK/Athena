@@ -94,6 +94,9 @@ class Athena:
 
         self.creator_name = self.identity["creator"]
         self.settings = Settings()
+        if getattr(__import__("sys"),"frozen",False):
+            from desktop.paths import resources
+            self.settings.values["projectRoot"]=str(resources())
         self.context_builder = ContextBuilder(self.memory, self.identity)
         self.llm_provider = OllamaProvider(self.settings, self.logger)
         self.git_awareness_engine = GitAwarenessEngine(
@@ -375,7 +378,7 @@ class Athena:
             with budget() if budget else nullcontext():
                 if self.settings.get("agentBackend", "legacy") == "openjarvis" and not str(user_input).startswith("/"):
                     from integrations.openjarvis.adapter import OpenJarvisRuntime
-                    snapshot=tuple(self.settings.get(k,False) for k in ('agentPlanningMode','agentToolSelection','computerToolsEnabled','browserToolsEnabled','allowExternalRequests'))
+                    snapshot=tuple(self.settings.get(k,False) for k in ('agentPlanningMode','agentToolSelection','agentToolMode','computerToolsEnabled','browserToolsEnabled','allowExternalRequests'))
                     if hasattr(self, 'agent_runtime') and self.agent_runtime.capability_snapshot != snapshot:
                         self.agent_runtime.close()
                         del self.agent_runtime

@@ -8,7 +8,8 @@ import time
 
 from runtime.process_lease import close_core, foreground_active, lease
 
-ROOT = Path(__file__).resolve().parent
+from desktop.paths import data_home
+ROOT = data_home()
 
 
 def run(once=False, interval=30):

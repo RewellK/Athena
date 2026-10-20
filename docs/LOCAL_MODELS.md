@@ -50,6 +50,15 @@ Procedimentos já aprendidos, rotinas e comandos estruturados podem executar sem
 LLM. A conversa livre e o planejamento novo precisam de interpretação pelo modelo.
 Consumo de RAM, disco e energia continuam existindo mesmo sem cobrança de API.
 
+## Aplicativo e planejamento progressivo
+
+O aplicativo agora usa `agentToolMode=progressive`: pedidos comuns recebem um
+catálogo pequeno em uma única chamada. Ferramentas de arquivos, navegador,
+calendário e habilidades são abertas sob demanda por chamada estrutural. O
+seletor antigo continua disponível fora desse modo. No teste de conversa com
+aprendizado espontâneo e correção, a resposta após reinício levou 13,3 s; guardar
+ou corrigir fatos levou cerca de 21–26 s. Ainda não é uma experiência instantânea.
+
 ## Configuração
 
 - `ollamaModel`: modelo principal instalado.

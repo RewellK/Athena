@@ -10,6 +10,12 @@ O roteador antigo continua disponível para compatibilidade.
 Esta é uma reconstrução funcional em evolução, não uma declaração de paridade
 com o JARVIS ficcional. Veja a [matriz de capacidades e limitações](docs/REBUILD_ACCEPTANCE.md).
 
+## Aplicativo do Mac
+
+Há uma compilação `.app` com Python incorporado, ícone na Mesa e menu na barra
+superior. Memória fica fora do aplicativo; fechar a janela mantém o residente.
+Veja [uso, voz, dados e instalação](docs/MAC_APP.md).
+
 ## Usar neste computador
 
 O ambiente `venv` foi preparado localmente. O modelo principal é `qwen3.5:4b`,
